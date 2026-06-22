@@ -94,47 +94,6 @@ export const SEP_JS = `
             :target {
                 scroll-margin-top: 4.5rem !important;
             }
-            /* Strip all container padding/margin first */
-            body, #container, #content, #article,
-            #aueditable, #article-content,
-            #preamble, #article-header, #article-banner {
-                padding-left: 0 !important;
-                padding-right: 0 !important;
-                margin-left: 0 !important;
-                margin-right: 0 !important;
-                max-width: 100% !important;
-                width: 100% !important;
-                box-sizing: border-box !important;
-            }
-            /* Reading padding + MinervaNeue-matched typography */
-            #aueditable,
-            #article-content {
-                padding: 0 1rem !important;
-                font-size: 1rem !important;
-                line-height: 1.5 !important;
-                letter-spacing: 0 !important;
-            }
-            #aueditable p,
-            #article-content p {
-                margin: 0.5rem 0 1rem 0 !important;
-            }
-            h1, .pagetitle {
-                font-size: 1.5rem !important;
-                line-height: 1.33 !important;
-                margin-bottom: 0.25em !important;
-            }
-            h2 {
-                font-size: 1.25rem !important;
-                line-height: 1.35 !important;
-                padding: 0.875rem 0 0.375rem !important;
-                margin: 0 !important;
-            }
-            h3 {
-                font-size: 1rem !important;
-                line-height: 1.5 !important;
-                font-weight: bold !important;
-                margin: 1rem 0 0.25rem 0 !important;
-            }
             /* TOC drawer */
             #toc {
                 top: 0 !important;
@@ -1377,45 +1336,6 @@ export const SEP_JS = `
         }
     }
 
-    // =============================================
-    // 11. MOBILE PADDING ENFORCER (counters SEP's inline style overrides)
-    // =============================================
-    if (isMobileViewport()) {
-        const mobileContainers = [
-            document.body,
-            document.getElementById('container'),
-            document.getElementById('content'),
-            document.getElementById('article'),
-            document.getElementById('aueditable'),
-            document.getElementById('article-content'),
-            document.getElementById('preamble'),
-            document.getElementById('article-header'),
-        ].filter(Boolean);
-        const contentEl = document.getElementById('aueditable') || document.getElementById('article-content');
-        let padObserver = null;
-        const enforceLayout = () => {
-            if (padObserver) padObserver.disconnect();
-            for (const el of mobileContainers) {
-                el.style.setProperty('padding-left', '0', 'important');
-                el.style.setProperty('padding-right', '0', 'important');
-                el.style.setProperty('margin-left', '0', 'important');
-                el.style.setProperty('margin-right', '0', 'important');
-                el.style.setProperty('max-width', '100%', 'important');
-                el.style.setProperty('width', '100%', 'important');
-            }
-            if (contentEl) {
-                contentEl.style.setProperty('padding-left', '1rem', 'important');
-                contentEl.style.setProperty('padding-right', '1rem', 'important');
-            }
-            requestAnimationFrame(() => {
-                padObserver = new MutationObserver(enforceLayout);
-                for (const el of mobileContainers) {
-                    padObserver.observe(el, { attributes: true, attributeFilter: ['style'] });
-                }
-            });
-        };
-        enforceLayout();
-    }
 
     // =============================================
     // 12. READER APP BAR (shows on scroll up)

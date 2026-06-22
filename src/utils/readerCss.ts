@@ -65,13 +65,11 @@ export const READER_CSS = `
     min-height: 100vh;
   }
 
-  #article-content, #aueditable, #preamble {
+  #article-content {
     max-width: var(--max-width);
     margin: 0 auto;
-    padding: 0 var(--side-pad);
+    padding: 2rem var(--side-pad) 4rem;
   }
-
-  #article-content { padding-top: 2rem; padding-bottom: 4rem; }
 
   /* When there's no TOC, article is full-width */
   body:not(:has(#toc)) #article { margin-left: 0; }
@@ -355,8 +353,10 @@ export const READER_CSS = `
       padding-top: 3rem;
     }
 
-    #article-content, #aueditable, #preamble {
+    #article-content {
       max-width: 100%;
+      padding-left: var(--side-pad);
+      padding-right: var(--side-pad);
     }
 
     h1, .pagetitle {
