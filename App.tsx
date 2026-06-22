@@ -7,10 +7,12 @@ import { getEntryCount } from './src/services/db';
 import { refreshIndexIfStale } from './src/services/catalog';
 import HomeScreen from './src/screens/HomeScreen';
 import ArticleScreen from './src/screens/ArticleScreen';
+import HistoryScreen from './src/screens/HistoryScreen';
 
 export type RootStackParamList = {
   Home: undefined;
-  Article: { slug: string; title: string };
+  Article: { slug: string; title: string; fromSlug?: string };
+  History: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -71,6 +73,7 @@ export default function App() {
         <Stack.Navigator id="root" screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Article" component={ArticleScreen} />
+          <Stack.Screen name="History" component={HistoryScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>

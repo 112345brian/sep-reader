@@ -15,3 +15,24 @@ export interface EntrySummary {
   author: string | null;
   cached_at: number | null;
 }
+
+export interface ReadRow {
+  id: number;
+  slug: string;
+  title: string;
+  visited_at: number;
+  from_slug: string | null;
+  session_id: string;
+}
+
+export interface ReadNode extends ReadRow {
+  depth: number;
+  children: ReadNode[];
+}
+
+export interface Session {
+  session_id: string;
+  started_at: number;
+  roots: ReadNode[];
+  total: number;
+}

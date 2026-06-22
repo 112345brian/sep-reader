@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { getEntry, recordVisit } from '../services/db';
+import { getEntry, recordRead } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import type { EntryRow } from '../types';
@@ -26,7 +26,7 @@ type LoadState =
 export default function ArticleScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
-  const { slug, title } = useRoute<Route>().params;
+  const { slug, title, fromSlug = null } = useRoute<Route>().params;
 
   const [state, setState] = useState<LoadState>({ phase: 'loading' });
   const [webReady, setWebReady] = useState(false);
@@ -56,7 +56,7 @@ export default function ArticleScreen() {
       return;
     }
 
-    await recordVisit(slug, entry.title);
+    await recordRead(slug, entry.title, fromSlug);
     setState({
       phase: 'ready',
       html: buildArticleHtml({
@@ -76,7 +76,7 @@ export default function ArticleScreen() {
     const entry = url.match(/plato\.stanford\.edu\/entries\/([a-z0-9-]+)\//);
     if (entry) {
       const target = entry[1];
-      if (target !== slug) nav.push('Article', { slug: target, title: target });
+      if (target !== slug) nav.push('Article', { slug: target, title: target, fromSlug: slug });
       return false;
     }
 

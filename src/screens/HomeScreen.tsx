@@ -6,11 +6,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { searchEntries, getHistory } from '../services/db';
+import { searchEntries, getRecentSlugs } from '../services/db';
 import type { EntrySummary } from '../types';
 import type { RootStackParamList } from '../../App';
 
-type Nav = NativeStackNavigationProp<RootStackParamList, 'Home'>;
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -23,7 +23,7 @@ export default function HomeScreen() {
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadHistory = useCallback(async () => {
-    const h = await getHistory(12);
+    const h = await getRecentSlugs(12);
     setHistory(h);
   }, []);
 
@@ -57,7 +57,12 @@ export default function HomeScreen() {
       <StatusBar barStyle="light-content" backgroundColor="#121212" />
 
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <Text style={styles.wordmark}>SEP</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.wordmark}>SEP</Text>
+          <TouchableOpacity onPress={() => nav.navigate('History')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={styles.journeyBtn}>Journey</Text>
+          </TouchableOpacity>
+        </View>
         <TextInput
           style={styles.search}
           placeholder="Search the Encyclopedia…"
@@ -152,12 +157,21 @@ const styles = StyleSheet.create({
     borderBottomColor: '#2a2a2a',
     gap: 8,
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   wordmark: {
     color: '#7ba4ff',
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 3,
     textTransform: 'uppercase',
+  },
+  journeyBtn: {
+    color: '#7ba4ff',
+    fontSize: 13,
   },
   search: {
     height: 38,
