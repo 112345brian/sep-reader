@@ -47,14 +47,14 @@ jobs:
 
       - name: Rename APK
         run: |
+          VERSION=$(node -p "require('./package.json').version")
           FLAVOR="${{ inputs.flavor }}"
-          DATE=$(date +%Y%m%d)
           mv android/app/build/outputs/apk/debug/app-debug.apk \
-             nous-${FLAVOR}-${DATE}.apk
+             nous-${VERSION}-${FLAVOR}.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: nous-${{ inputs.flavor }}-apk
-          path: nous-*.apk
+          path: "nous-*.apk"
           retention-days: 14
