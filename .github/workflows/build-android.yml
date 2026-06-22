@@ -1,0 +1,60 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: 'Build type'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - test
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Enable test build flag
+        if: inputs.flavor == 'test'
+        run: sed -i 's/IS_TEST_BUILD = false/IS_TEST_BUILD = true/' src/testConfig.ts
+
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: |
+          FLAVOR="${{ inputs.flavor }}"
+          DATE=$(date +%Y%m%d)
+          mv android/app/build/outputs/apk/debug/app-debug.apk \
+             nous-${FLAVOR}-${DATE}.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nous-${{ inputs.flavor }}-apk
+          path: nous-*.apk
+          retention-days: 14
