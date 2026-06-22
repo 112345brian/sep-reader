@@ -236,7 +236,7 @@ export default function SettingsScreen() {
               style={[styles.input, styles.pathInput]}
               value={syncFolder}
               onChangeText={setSyncFolderState}
-              placeholder={Platform.OS === 'macos' ? '~/Documents/SEP Reader/' : '/sdcard/SEP Reader/'}
+              placeholder={Platform.OS === 'macos' ? '~/Documents/Nous/' : '/sdcard/Nous/'}
               placeholderTextColor="#333"
               autoCorrect={false}
               autoCapitalize="none"
@@ -272,7 +272,7 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </Section>
 
-        <Text style={styles.version}>SEP Reader · v0.1.0</Text>
+        <Text style={styles.version}>Nous · v0.1.0</Text>
       </ScrollView>
     </View>
   );

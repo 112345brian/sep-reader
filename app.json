@@ -1,6 +1,6 @@
 {
-  "name": "SepReader",
-  "displayName": "SepReader",
+  "name": "Nous",
+  "displayName": "Nous",
   "plugins": [
     "expo-sqlite"
   ]

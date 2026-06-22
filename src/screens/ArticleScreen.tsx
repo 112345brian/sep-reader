@@ -331,6 +331,9 @@ export default function ArticleScreen() {
             decelerationRate="normal"
             overScrollMode="never"
             contentInset={{ bottom: insets.bottom }}
+            scalesPageToFit={false}
+            textZoom={100}
+            androidLayerType="hardware"
           />
         </View>
       )}
