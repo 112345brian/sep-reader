@@ -10,6 +10,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { getEntry, recordRead, toggleBookmark, isBookmarked } from '../services/db';
+import BookmarkIcon from '../components/BookmarkIcon';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import type { EntryRow } from '../types';
@@ -141,9 +142,7 @@ export default function ArticleScreen() {
             onPress={handleBookmark}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <Text style={[styles.actionIcon, bookmarked && styles.actionActive]}>
-              {bookmarked ? '★' : '☆'}
-            </Text>
+            <BookmarkIcon active={bookmarked} size={22} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={handleShare}
