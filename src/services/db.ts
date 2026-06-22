@@ -74,12 +74,6 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       updated_at    INTEGER NOT NULL
     );
 
-    CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
-      slug UNINDEXED,
-      title,
-      content='entries',
-      tokenize='porter ascii'
-    );
   `);
 
   // Column migrations — no-op if columns already exist
@@ -89,6 +83,24 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     db.runAsync('ALTER TABLE bookmarks ADD COLUMN notes TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE annotations ADD COLUMN content_hash TEXT').catch(() => {}),
   ]);
+
+  // Migrate FTS from content-table to standalone if needed, then ensure it exists
+  const ftsInfo = await db.getFirstAsync<{ sql: string }>(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='entries_fts'`
+  );
+  const needsCreate = !ftsInfo || ftsInfo.sql?.includes("content='entries'");
+  if (needsCreate) {
+    await db.runAsync('DROP TABLE IF EXISTS entries_fts');
+    await db.runAsync(`
+      CREATE VIRTUAL TABLE entries_fts USING fts5(
+        slug UNINDEXED,
+        title,
+        tokenize='porter ascii'
+      )
+    `);
+    // Populate from existing entries
+    await db.runAsync(`INSERT INTO entries_fts(slug, title) SELECT slug, title FROM entries`);
+  }
 }
 
 export async function getEntryCount(): Promise<number> {
