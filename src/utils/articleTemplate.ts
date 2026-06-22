@@ -1,4 +1,5 @@
 import { SEP_CSS, SEP_JS } from './injectedAssets';
+import { ANNOTATION_JS } from './annotationJs';
 
 export interface ArticleData {
   slug: string;
@@ -47,6 +48,7 @@ body { margin: 0; padding: 0; font-family: 'Source Serif 4', Georgia, 'Times New
 document.querySelector('#search form')?.addEventListener('submit', e => e.preventDefault());
 </script>
 <script>${SEP_JS}</script>
+<script>${ANNOTATION_JS}</script>
 </body>
 </html>`;
 }

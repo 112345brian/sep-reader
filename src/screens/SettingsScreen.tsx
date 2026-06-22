@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Alert, ScrollView, TextInput, Platform, Share,
+  Alert, ScrollView, TextInput, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -11,7 +11,7 @@ import {
   clearArticleCache, getZoteroPrefs, saveZoteroPrefs, getSyncFolder, setSyncFolder,
 } from '../services/db';
 import type { Prefs } from '../services/db';
-import { exportToSyncFolder, importFromSyncFolder, getDbFile } from '../services/dataSync';
+import { exportToSyncFolder, importFromSyncFolder } from '../services/dataSync';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -68,17 +68,12 @@ export default function SettingsScreen() {
       const result = await exportToSyncFolder();
       Alert.alert(
         result === 'ok' ? 'Exported' : 'Export failed',
-        result === 'ok' ? `Database copied to:\n${folder}` : 'Could not write to that folder.'
+        result === 'ok'
+          ? `User data written to:\n${folder}/sep_user.json`
+          : 'Could not write to that folder. Check the path.'
       );
     } else {
-      // Share the DB file directly
-      try {
-        const dbFile = getDbFile();
-        if (!dbFile.exists) { Alert.alert('No data yet'); return; }
-        await Share.share({ url: dbFile.uri, title: 'sep.db', message: 'SEP Reader database' });
-      } catch {
-        Alert.alert('Error', 'Could not share the database file.');
-      }
+      Alert.alert('No sync folder set', 'Enter a folder path above to export your data.');
     }
   }
 

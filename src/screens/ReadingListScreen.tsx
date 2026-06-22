@@ -8,8 +8,10 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   getBookmarksFull, toggleBookmark, formatCitation, getZoteroPrefs,
+  getAnnotationsForSlug,
 } from '../services/db';
 import type { BookmarkRow } from '../services/db';
+import type { Annotation } from '../types';
 import { exportToZotero } from '../services/dataSync';
 import type { RootStackParamList } from '../../App';
 
@@ -58,9 +60,13 @@ export default function ReadingListScreen() {
       );
       return;
     }
-    const result = await exportToZotero(apiKey, userId, item);
+    const annotations = await getAnnotationsForSlug(item.slug);
+    const result = await exportToZotero(apiKey, userId, item, annotations);
     if (result === 'ok') {
-      Alert.alert('Saved to Zotero', `"${item.title}" was added to your Zotero library.`);
+      const msg = annotations.length > 0
+        ? `"${item.title}" and ${annotations.length} highlight${annotations.length > 1 ? 's' : ''} added to your Zotero library.`
+        : `"${item.title}" was added to your Zotero library.`;
+      Alert.alert('Saved to Zotero', msg);
     } else if (result === 'auth_error') {
       Alert.alert('Auth error', 'Check your Zotero API key in Settings.');
     } else {

@@ -37,3 +37,14 @@ export interface Session {
   roots: ReadNode[];
   total: number;
 }
+
+export interface Annotation {
+  id: number;
+  slug: string;
+  selected_text: string;
+  context: string | null;
+  note: string | null;
+  color: string;
+  created_at: number;
+  updated_at: number;
+}

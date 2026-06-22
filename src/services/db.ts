@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session } from '../types';
+import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
@@ -51,6 +51,17 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       from_slug TEXT NOT NULL,
       to_slug   TEXT NOT NULL,
       PRIMARY KEY (from_slug, to_slug)
+    );
+
+    CREATE TABLE IF NOT EXISTS annotations (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug          TEXT NOT NULL,
+      selected_text TEXT NOT NULL,
+      context       TEXT,
+      note          TEXT,
+      color         TEXT NOT NULL DEFAULT '#FFE566',
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
     );
 
     CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
@@ -439,6 +450,132 @@ export async function saveZoteroPrefs(apiKey: string, userId: string): Promise<v
   await db.withTransactionAsync(async () => {
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_api_key', ?)", [apiKey]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_user_id', ?)", [userId]);
+  });
+}
+
+// ── Annotations ──────────────────────────────────────────────────────────────
+
+export async function saveAnnotation(
+  slug: string,
+  selectedText: string,
+  context: string | null,
+  color: string,
+  note: string | null = null
+): Promise<Annotation> {
+  const db = await getDb();
+  const now = Date.now();
+  const result = await db.runAsync(
+    `INSERT INTO annotations (slug, selected_text, context, note, color, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [slug, selectedText, context ?? null, note ?? null, color, now, now]
+  );
+  return {
+    id: result.lastInsertRowId,
+    slug, selected_text: selectedText, context: context ?? null,
+    note: note ?? null, color, created_at: now, updated_at: now,
+  };
+}
+
+export async function updateAnnotation(
+  id: number, note: string | null, color: string
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'UPDATE annotations SET note = ?, color = ?, updated_at = ? WHERE id = ?',
+    [note ?? null, color, Date.now(), id]
+  );
+}
+
+export async function deleteAnnotation(id: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM annotations WHERE id = ?', [id]);
+}
+
+export async function getAnnotationsForSlug(slug: string): Promise<Annotation[]> {
+  const db = await getDb();
+  return db.getAllAsync<Annotation>(
+    'SELECT * FROM annotations WHERE slug = ? ORDER BY created_at ASC', [slug]
+  );
+}
+
+export async function getAllAnnotations(): Promise<Annotation[]> {
+  const db = await getDb();
+  return db.getAllAsync<Annotation>('SELECT * FROM annotations ORDER BY created_at ASC');
+}
+
+// ── JSON user data export / import ───────────────────────────────────────────
+
+export interface UserDataExport {
+  version: number;
+  exported_at: number;
+  reads: ReadRow[];
+  bookmarks: BookmarkRow[];
+  annotations: Annotation[];
+  prefs: Record<string, string>;
+}
+
+export async function exportUserData(): Promise<UserDataExport> {
+  const db = await getDb();
+  const [reads, bookmarks, annotations, metaRows] = await Promise.all([
+    db.getAllAsync<ReadRow>('SELECT * FROM reads ORDER BY visited_at ASC'),
+    db.getAllAsync<BookmarkRow>('SELECT * FROM bookmarks ORDER BY saved_at ASC'),
+    db.getAllAsync<Annotation>('SELECT * FROM annotations ORDER BY created_at ASC'),
+    db.getAllAsync<{ key: string; value: string }>(
+      "SELECT key, value FROM meta WHERE key NOT IN ('onboarding_done')"
+    ),
+  ]);
+  return {
+    version: 1,
+    exported_at: Date.now(),
+    reads,
+    bookmarks,
+    annotations,
+    prefs: Object.fromEntries(metaRows.map(r => [r.key, r.value])),
+  };
+}
+
+export async function importUserData(data: UserDataExport): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    // Reads: insert-or-ignore by (slug, visited_at) to avoid dupes
+    for (const r of data.reads) {
+      await db.runAsync(
+        `INSERT OR IGNORE INTO reads (slug, title, visited_at, from_slug, session_id)
+         VALUES (?, ?, ?, ?, ?)`,
+        [r.slug, r.title, r.visited_at, r.from_slug ?? null, r.session_id]
+      );
+    }
+    // Bookmarks: upsert by slug, keep newest saved_at
+    for (const b of data.bookmarks) {
+      await db.runAsync(
+        `INSERT INTO bookmarks (slug, title, saved_at, notes)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(slug) DO UPDATE SET
+           title = excluded.title,
+           saved_at = MAX(saved_at, excluded.saved_at),
+           notes = COALESCE(excluded.notes, notes)`,
+        [b.slug, b.title, b.saved_at, b.notes ?? null]
+      );
+    }
+    // Annotations: upsert by id — incoming id wins on conflict
+    for (const a of data.annotations) {
+      await db.runAsync(
+        `INSERT INTO annotations (id, slug, selected_text, context, note, color, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           note = COALESCE(excluded.note, note),
+           color = excluded.color,
+           updated_at = MAX(updated_at, excluded.updated_at)`,
+        [a.id, a.slug, a.selected_text, a.context ?? null,
+         a.note ?? null, a.color, a.created_at, a.updated_at]
+      );
+    }
+    // Prefs: merge, remote wins
+    for (const [key, value] of Object.entries(data.prefs ?? {})) {
+      await db.runAsync(
+        'INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value]
+      );
+    }
   });
 }
 
