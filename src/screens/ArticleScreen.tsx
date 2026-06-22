@@ -334,9 +334,6 @@ export default function ArticleScreen() {
             domStorageEnabled
             scrollEnabled
             showsVerticalScrollIndicator={false}
-            decelerationRate="normal"
-            overScrollMode="never"
-            contentInset={{ bottom: insets.bottom }}
             scalesPageToFit={false}
             textZoom={100}
             androidLayerType="hardware"
