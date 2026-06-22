@@ -8,6 +8,8 @@ import { getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services
 import { syncOnLaunch } from './src/services/dataSync';
 import { refreshIndexIfStale, downloadAll } from './src/services/catalog';
 import type { Prefs } from './src/services/db';
+import { IS_TEST_BUILD } from './src/testConfig';
+import TestRunnerScreen from './src/screens/TestRunnerScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import ArticleScreen from './src/screens/ArticleScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
@@ -50,6 +52,14 @@ const THEME = {
 type AppPhase = 'booting' | 'onboarding' | 'indexing' | 'index_error' | 'ready';
 
 export default function App() {
+  if (IS_TEST_BUILD) {
+    return (
+      <SafeAreaProvider>
+        <TestRunnerScreen />
+      </SafeAreaProvider>
+    );
+  }
+
   const [phase, setPhase] = useState<AppPhase>('booting');
   const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
   const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
