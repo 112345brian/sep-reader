@@ -1,11 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  TouchableOpacity,
-  Platform,
+  View, Text, StyleSheet, ActivityIndicator, TouchableOpacity,
 } from 'react-native';
 import WebView from 'react-native-webview';
 import type { WebViewNavigation } from 'react-native-webview';
@@ -13,106 +8,137 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { getArticle } from '../services/db';
+import { getEntry, recordVisit } from '../services/db';
+import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
+import type { EntryRow } from '../types';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Article'>;
 type Route = RouteProp<RootStackParamList, 'Article'>;
 
+type LoadState =
+  | { phase: 'loading' }
+  | { phase: 'fetching' }
+  | { phase: 'ready'; html: string }
+  | { phase: 'error'; message: string };
+
 export default function ArticleScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
-  const route = useRoute<Route>();
-  const { slug, title } = route.params;
+  const { slug, title } = useRoute<Route>().params;
 
-  const [html, setHtml] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [webLoading, setWebLoading] = useState(true);
+  const [state, setState] = useState<LoadState>({ phase: 'loading' });
+  const [webReady, setWebReady] = useState(false);
+
   useEffect(() => {
-    (async () => {
-      const article = await getArticle(slug);
-      if (!article || !article.content_html) {
-        setLoading(false);
-        return;
-      }
-      setHtml(buildArticleHtml({
-        slug: article.slug,
-        title: article.title,
-        tocHtml: article.toc_html ?? '',
-        contentHtml: article.content_html,
-        preambleHtml: article.preamble_html ?? '',
-      }));
-      setLoading(false);
-    })();
+    load();
   }, [slug]);
 
-  const handleNavChange = useCallback((req: WebViewNavigation) => {
-    const url = req.url;
+  async function load() {
+    setState({ phase: 'loading' });
+    setWebReady(false);
 
-    // Stay local: fragment navigation and about:blank
+    let entry = await getEntry(slug);
+
+    if (!entry?.content_html) {
+      setState({ phase: 'fetching' });
+      const ok = await fetchAndCacheArticle(slug);
+      if (!ok) {
+        setState({ phase: 'error', message: 'Could not load this article. Check your connection.' });
+        return;
+      }
+      entry = await getEntry(slug);
+    }
+
+    if (!entry?.content_html) {
+      setState({ phase: 'error', message: 'Article content unavailable.' });
+      return;
+    }
+
+    await recordVisit(slug, entry.title);
+    setState({
+      phase: 'ready',
+      html: buildArticleHtml({
+        slug: entry.slug,
+        title: entry.title,
+        tocHtml: entry.toc_html ?? '',
+        contentHtml: entry.content_html,
+        preambleHtml: entry.preamble_html ?? '',
+      }),
+    });
+  }
+
+  const handleNav = useCallback((req: WebViewNavigation): boolean => {
+    const url = req.url;
     if (url.startsWith('about:') || url.startsWith('data:')) return true;
 
-    // Internal SEP article link — navigate within app
-    const entryMatch = url.match(/plato\.stanford\.edu\/entries\/([a-z0-9-]+)\//);
-    if (entryMatch) {
-      const targetSlug = entryMatch[1];
-      if (targetSlug !== slug) {
-        nav.push('Article', { slug: targetSlug, title: targetSlug });
-      }
+    const entry = url.match(/plato\.stanford\.edu\/entries\/([a-z0-9-]+)\//);
+    if (entry) {
+      const target = entry[1];
+      if (target !== slug) nav.push('Article', { slug: target, title: target });
       return false;
     }
 
-    // Fragment link within same page — allow
-    if (url.includes('#')) return true;
+    // Fragment navigation — allow
+    if (url.includes('#') && !url.includes('plato.stanford.edu')) return true;
 
-    // Everything else (external links) — block, could open in browser if desired
     return false;
   }, [slug, nav]);
 
-  const headerHeight = insets.top + 44;
-
   return (
-    <View style={styles.container}>
-      {/* Native header */}
-      <View style={[styles.header, { paddingTop: insets.top, height: headerHeight }]}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => nav.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+    <View style={styles.root}>
+      <View style={[styles.header, { paddingTop: insets.top }]}>
+        <TouchableOpacity
+          style={styles.back}
+          onPress={() => nav.goBack()}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
           <Text style={styles.backChevron}>‹</Text>
           <Text style={styles.backLabel}>Library</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-        <View style={styles.backBtn} />
+        <View style={styles.back} />
       </View>
 
-      {loading && (
-        <View style={styles.loader}>
+      {state.phase === 'loading' && (
+        <View style={styles.center}>
           <ActivityIndicator color="#7ba4ff" size="large" />
         </View>
       )}
 
-      {!loading && !html && (
-        <View style={styles.loader}>
-          <Text style={styles.errorText}>Article not yet downloaded</Text>
+      {state.phase === 'fetching' && (
+        <View style={styles.center}>
+          <ActivityIndicator color="#7ba4ff" size="large" />
+          <Text style={styles.fetchingLabel}>Loading article…</Text>
         </View>
       )}
 
-      {!loading && html && (
-        <View style={styles.webContainer}>
-          {webLoading && (
-            <View style={styles.webLoader}>
+      {state.phase === 'error' && (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>{state.message}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={load}>
+            <Text style={styles.retryLabel}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {state.phase === 'ready' && (
+        <View style={styles.webWrap}>
+          {!webReady && (
+            <View style={styles.webOverlay}>
               <ActivityIndicator color="#7ba4ff" />
             </View>
           )}
           <WebView
-            source={{ html, baseUrl: 'https://plato.stanford.edu' }}
-            style={styles.webView}
+            source={{ html: state.html, baseUrl: 'https://plato.stanford.edu' }}
+            style={styles.web}
             originWhitelist={['*']}
-            onShouldStartLoadWithRequest={handleNavChange}
-            onLoadEnd={() => setWebLoading(false)}
-            allowFileAccess={false}
-            javaScriptEnabled={true}
-            domStorageEnabled={true}
-            scrollEnabled={true}
+            onShouldStartLoadWithRequest={handleNav}
+            onLoadEnd={() => setWebReady(true)}
+            javaScriptEnabled
+            domStorageEnabled
+            scrollEnabled
             showsVerticalScrollIndicator={false}
             decelerationRate="normal"
             overScrollMode="never"
@@ -125,36 +151,24 @@ export default function ArticleScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#121212',
-  },
+  root: { flex: 1, backgroundColor: '#121212' },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: 8,
-    paddingBottom: 6,
-    backgroundColor: '#121212',
+    paddingBottom: 8,
+    paddingHorizontal: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#2a2a2a',
+    minHeight: 44,
   },
-  backBtn: {
+  back: {
     flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 70,
+    minWidth: 80,
     paddingHorizontal: 8,
-    paddingVertical: 4,
   },
-  backChevron: {
-    color: '#7ba4ff',
-    fontSize: 26,
-    lineHeight: 26,
-    marginRight: 2,
-  },
-  backLabel: {
-    color: '#7ba4ff',
-    fontSize: 16,
-  },
+  backChevron: { color: '#7ba4ff', fontSize: 28, lineHeight: 28, marginRight: 1 },
+  backLabel: { color: '#7ba4ff', fontSize: 16 },
   headerTitle: {
     flex: 1,
     color: '#e8e8e8',
@@ -162,28 +176,32 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-  webContainer: {
-    flex: 1,
-    position: 'relative',
-  },
-  webView: {
-    flex: 1,
-    backgroundColor: '#121212',
-  },
-  webLoader: {
+  webWrap: { flex: 1 },
+  web: { flex: 1, backgroundColor: '#121212' },
+  webOverlay: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#121212',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#121212',
     zIndex: 10,
   },
-  loader: {
+  center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 16,
   },
+  fetchingLabel: { color: '#555', fontSize: 14 },
   errorText: {
-    color: '#555',
-    fontSize: 15,
+    color: '#888', fontSize: 15,
+    textAlign: 'center', paddingHorizontal: 32,
   },
+  retryBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  retryLabel: { color: '#7ba4ff', fontSize: 15 },
 });

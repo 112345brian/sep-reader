@@ -1,21 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  FlatList,
-  TouchableOpacity,
-  StyleSheet,
-  StatusBar,
-  Platform,
-  ActivityIndicator,
+  View, Text, TextInput, FlatList, TouchableOpacity,
+  StyleSheet, StatusBar, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { searchArticles, getArticleCount } from '../services/db';
-import { runSync } from '../services/sync';
-import type { ArticleSummary, SyncStatus } from '../types';
+import { searchEntries, getHistory } from '../services/db';
+import type { EntrySummary } from '../types';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Home'>;
@@ -25,203 +17,201 @@ export default function HomeScreen() {
   const nav = useNavigation<Nav>();
 
   const [query, setQuery] = useState('');
-  const [articles, setArticles] = useState<ArticleSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
-  const [count, setCount] = useState(0);
-  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [results, setResults] = useState<EntrySummary[]>([]);
+  const [history, setHistory] = useState<EntrySummary[]>([]);
+  const [searching, setSearching] = useState(false);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const load = useCallback(async (q: string) => {
-    const results = await searchArticles(q, 100);
-    setArticles(results);
-    setLoading(false);
+  const loadHistory = useCallback(async () => {
+    const h = await getHistory(12);
+    setHistory(h);
   }, []);
 
-  useEffect(() => {
-    load('');
-    getArticleCount().then(setCount);
-  }, []);
-
-  // Background sync for new/updated articles
-  useEffect(() => {
-    getArticleCount().then(n => {
-      if (n === 0) return; // SyncScreen handles initial sync
-      runSync(s => {
-        if (s.phase === 'syncing' || s.phase === 'done') setSyncStatus(s);
-        if (s.phase === 'done') {
-          setTimeout(() => setSyncStatus(null), 3000);
-          getArticleCount().then(setCount);
-          if (!query) load('');
-        }
-      });
-    });
-  }, []);
+  useFocusEffect(useCallback(() => {
+    loadHistory();
+  }, [loadHistory]));
 
   const handleSearch = (text: string) => {
     setQuery(text);
-    if (searchTimeout.current) clearTimeout(searchTimeout.current);
-    searchTimeout.current = setTimeout(() => load(text), 200);
+    if (debounce.current) clearTimeout(debounce.current);
+    if (!text.trim()) {
+      setSearching(false);
+      setResults([]);
+      return;
+    }
+    setSearching(true);
+    debounce.current = setTimeout(async () => {
+      const r = await searchEntries(text, 60);
+      setResults(r);
+      setSearching(false);
+    }, 150);
   };
 
-  const renderItem = ({ item }: { item: ArticleSummary }) => (
-    <TouchableOpacity
-      style={styles.row}
-      onPress={() => nav.navigate('Article', { slug: item.slug, title: item.title })}
-      activeOpacity={0.6}
-    >
-      <Text style={styles.rowTitle}>{item.title}</Text>
-      {item.author && (
-        <Text style={styles.rowMeta} numberOfLines={1}>{item.author}</Text>
-      )}
-    </TouchableOpacity>
-  );
+  const open = (slug: string, title: string) =>
+    nav.navigate('Article', { slug, title });
 
-  const headerHeight = insets.top + 56;
+  const isSearching = query.trim().length > 0;
 
   return (
-    <View style={styles.container}>
+    <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor="#121212" />
 
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8, height: headerHeight }]}>
-        <View style={styles.searchRow}>
-          <Text style={styles.logo}>SEP</Text>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search all articles…"
-            placeholderTextColor="#444"
-            value={query}
-            onChangeText={handleSearch}
-            returnKeyType="search"
-            autoCorrect={false}
-            autoCapitalize="none"
-            clearButtonMode="while-editing"
-          />
-        </View>
+      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
+        <Text style={styles.wordmark}>SEP</Text>
+        <TextInput
+          style={styles.search}
+          placeholder="Search the Encyclopedia…"
+          placeholderTextColor="#555"
+          value={query}
+          onChangeText={handleSearch}
+          returnKeyType="search"
+          autoCorrect={false}
+          autoCapitalize="none"
+          clearButtonMode="while-editing"
+        />
       </View>
 
-      {/* Sync status bar */}
-      {syncStatus?.phase === 'syncing' && (
-        <View style={styles.syncBar}>
-          <ActivityIndicator size="small" color="#7ba4ff" style={{ marginRight: 8 }} />
-          <Text style={styles.syncText}>
-            Syncing {syncStatus.done}/{syncStatus.total}…
-          </Text>
-        </View>
-      )}
-
-      {loading ? (
-        <ActivityIndicator color="#7ba4ff" style={styles.centerSpinner} />
+      {isSearching ? (
+        <FlatList
+          data={results}
+          keyExtractor={i => i.slug}
+          renderItem={({ item }) => <Row item={item} onPress={open} />}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+          keyboardShouldPersistTaps="handled"
+          ListHeaderComponent={
+            searching
+              ? <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
+              : results.length === 0
+              ? <Text style={styles.empty}>No results for "{query}"</Text>
+              : null
+          }
+        />
       ) : (
         <FlatList
-          data={articles}
-          keyExtractor={item => item.slug}
-          renderItem={renderItem}
+          data={history}
+          keyExtractor={i => i.slug}
+          renderItem={({ item }) => <Row item={item} onPress={open} showCached />}
           contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
           ListHeaderComponent={
-            !query ? (
-              <Text style={styles.listHeader}>
-                {count.toLocaleString()} articles
-              </Text>
-            ) : null
+            history.length > 0
+              ? <Text style={styles.sectionLabel}>Recent</Text>
+              : <Text style={styles.hint}>
+                  Search any topic in philosophy.{'\n'}Articles cache for offline reading.
+                </Text>
           }
-          ListEmptyComponent={
-            <Text style={styles.empty}>No results for "{query}"</Text>
+          ListFooterComponent={
+            history.length > 0
+              ? <TouchableOpacity
+                  style={styles.browseBtn}
+                  onPress={() => handleSearch(' ')}
+                >
+                  <Text style={styles.browseBtnText}>Browse all entries →</Text>
+                </TouchableOpacity>
+              : null
           }
-          keyboardShouldPersistTaps="handled"
-          getItemLayout={(_, index) => ({
-            length: 68,
-            offset: 68 * index,
-            index,
-          })}
         />
       )}
     </View>
   );
 }
 
+function Row({
+  item,
+  onPress,
+  showCached,
+}: {
+  item: EntrySummary;
+  onPress: (slug: string, title: string) => void;
+  showCached?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      style={styles.row}
+      onPress={() => onPress(item.slug, item.title)}
+      activeOpacity={0.55}
+    >
+      <View style={styles.rowInner}>
+        <Text style={styles.rowTitle}>{item.title}</Text>
+        {item.author && (
+          <Text style={styles.rowMeta} numberOfLines={1}>{item.author}</Text>
+        )}
+      </View>
+      {showCached && item.cached_at && (
+        <View style={styles.cachedDot} />
+      )}
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#121212',
-  },
+  root: { flex: 1, backgroundColor: '#121212' },
   header: {
-    backgroundColor: '#121212',
+    paddingHorizontal: 16,
+    paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#2a2a2a',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+    gap: 8,
   },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  logo: {
+  wordmark: {
     color: '#7ba4ff',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 2,
+    letterSpacing: 3,
+    textTransform: 'uppercase',
   },
-  searchInput: {
-    flex: 1,
-    height: 36,
-    backgroundColor: '#1e1e1e',
-    borderRadius: 8,
+  search: {
+    height: 38,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
     paddingHorizontal: 12,
     color: '#e8e8e8',
-    fontSize: 15,
+    fontSize: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#2a2a2a',
   },
-  syncBar: {
+  sectionLabel: {
+    color: '#444',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 4,
+  },
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#1a1a2e',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#2a2a2a',
-  },
-  syncText: {
-    color: '#7ba4ff',
-    fontSize: 12,
-  },
-  listHeader: {
-    color: '#555',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  row: {
-    height: 68,
-    paddingHorizontal: 16,
-    justifyContent: 'center',
+    paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#1e1e1e',
   },
-  rowTitle: {
-    color: '#d6d6d6',
-    fontSize: 16,
-    fontWeight: '400',
+  rowInner: { flex: 1 },
+  rowTitle: { color: '#d6d6d6', fontSize: 16 },
+  rowMeta: { color: '#555', fontSize: 12, marginTop: 2 },
+  cachedDot: {
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: '#7ba4ff', marginLeft: 10, opacity: 0.7,
   },
-  rowMeta: {
-    color: '#555',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  centerSpinner: {
-    flex: 1,
-  },
-  empty: {
-    color: '#555',
+  hint: {
+    color: '#444',
     fontSize: 15,
+    lineHeight: 22,
     textAlign: 'center',
-    marginTop: 60,
+    marginTop: 80,
+    paddingHorizontal: 32,
+  },
+  browseBtn: {
+    alignSelf: 'center',
+    marginTop: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  browseBtnText: { color: '#7ba4ff', fontSize: 14 },
+  empty: {
+    color: '#555', fontSize: 14,
+    textAlign: 'center', marginTop: 48,
     paddingHorizontal: 32,
   },
 });

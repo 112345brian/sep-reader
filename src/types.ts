@@ -1,4 +1,4 @@
-export interface ArticleRow {
+export interface EntryRow {
   slug: string;
   title: string;
   author: string | null;
@@ -6,19 +6,12 @@ export interface ArticleRow {
   preamble_html: string | null;
   content_html: string | null;
   word_count: number;
-  synced_at: number;
+  cached_at: number | null;
 }
 
-export interface ArticleSummary {
+export interface EntrySummary {
   slug: string;
   title: string;
   author: string | null;
-  word_count: number;
+  cached_at: number | null;
 }
-
-export type SyncStatus =
-  | { phase: 'idle' }
-  | { phase: 'fetching-list' }
-  | { phase: 'syncing'; done: number; total: number; current: string }
-  | { phase: 'done'; count: number }
-  | { phase: 'error'; message: string };

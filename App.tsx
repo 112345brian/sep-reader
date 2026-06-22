@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { getArticleCount } from './src/services/db';
+import { getEntryCount } from './src/services/db';
+import { refreshIndexIfStale } from './src/services/catalog';
 import HomeScreen from './src/screens/HomeScreen';
 import ArticleScreen from './src/screens/ArticleScreen';
-import SyncScreen from './src/screens/SyncScreen';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -14,7 +15,7 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-const DARK_THEME = {
+const THEME = {
   dark: true,
   colors: {
     primary: '#7ba4ff',
@@ -33,29 +34,40 @@ const DARK_THEME = {
 };
 
 export default function App() {
-  const [ready, setReady] = useState(false);
-  const [needsSync, setNeedsSync] = useState(false);
+  // Three states: 'booting' | 'indexing' | 'ready'
+  const [phase, setPhase] = useState<'booting' | 'indexing' | 'ready'>('booting');
 
   useEffect(() => {
-    getArticleCount().then(n => {
-      setNeedsSync(n === 0);
-      setReady(true);
-    });
+    (async () => {
+      const count = await getEntryCount();
+      if (count === 0) {
+        setPhase('indexing');
+        await refreshIndexIfStale();
+      } else {
+        // Already have entries — go straight to ready, refresh index in background
+        refreshIndexIfStale();
+      }
+      setPhase('ready');
+    })();
   }, []);
 
-  if (!ready) return null;
-
-  if (needsSync) {
+  if (phase !== 'ready') {
     return (
-      <SafeAreaProvider>
-        <SyncScreen onComplete={() => setNeedsSync(false)} />
-      </SafeAreaProvider>
+      <View style={styles.boot}>
+        <Text style={styles.bootLogo}>SEP</Text>
+        {phase === 'indexing' && (
+          <>
+            <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
+            <Text style={styles.bootLabel}>Building index…</Text>
+          </>
+        )}
+      </View>
     );
   }
 
   return (
     <SafeAreaProvider>
-      <NavigationContainer theme={DARK_THEME}>
+      <NavigationContainer theme={THEME}>
         <Stack.Navigator id="root" screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Article" component={ArticleScreen} />
@@ -64,3 +76,24 @@ export default function App() {
     </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  boot: {
+    flex: 1,
+    backgroundColor: '#121212',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bootLogo: {
+    color: '#7ba4ff',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 4,
+    textTransform: 'uppercase',
+  },
+  bootLabel: {
+    color: '#444',
+    fontSize: 13,
+    marginTop: 12,
+  },
+});
