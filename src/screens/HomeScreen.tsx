@@ -60,13 +60,16 @@ export default function HomeScreen() {
 
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <View style={styles.headerRow}>
-          <Text style={styles.wordmark}>SEP</Text>
+          <Text style={styles.wordmark}>Nous</Text>
           <View style={styles.headerActions}>
+            <TouchableOpacity onPress={() => nav.navigate('Annotations')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.headerAction}>Highlights</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => nav.navigate('Graph', {})} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.headerAction}>Graph</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => nav.navigate('ReadingList')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={styles.headerAction}>Saved</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => nav.navigate('History')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.headerAction}>Journey</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => nav.navigate('Settings')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={styles.headerAction}>⚙</Text>
@@ -184,10 +187,9 @@ const styles = StyleSheet.create({
   },
   wordmark: {
     color: '#7ba4ff',
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '400',
     letterSpacing: 3,
-    textTransform: 'uppercase',
   },
   headerActions: { flexDirection: 'row', gap: 16, alignItems: 'center' },
   headerAction: { color: '#7ba4ff', fontSize: 13 },

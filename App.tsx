@@ -14,6 +14,8 @@ import HistoryScreen from './src/screens/HistoryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ReadingListScreen from './src/screens/ReadingListScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
+import AnnotationsScreen from './src/screens/AnnotationsScreen';
+import GraphScreen from './src/screens/GraphScreen';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -21,6 +23,8 @@ export type RootStackParamList = {
   History: undefined;
   ReadingList: undefined;
   Settings: undefined;
+  Annotations: undefined;
+  Graph: { centerSlug?: string; centerTitle?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -111,7 +115,7 @@ export default function App() {
   if (phase === 'booting') {
     return (
       <View style={styles.boot}>
-        <Text style={styles.bootLogo}>SEP</Text>
+        <Text style={styles.bootLogo}>Nous</Text>
       </View>
     );
   }
@@ -127,7 +131,7 @@ export default function App() {
   if (phase === 'indexing') {
     return (
       <View style={styles.boot}>
-        <Text style={styles.bootLogo}>SEP</Text>
+        <Text style={styles.bootLogo}>Nous</Text>
         <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
         <Text style={styles.bootLabel}>Building index…</Text>
       </View>
@@ -137,7 +141,7 @@ export default function App() {
   if (phase === 'index_error') {
     return (
       <View style={styles.boot}>
-        <Text style={styles.bootLogo}>SEP</Text>
+        <Text style={styles.bootLogo}>Nous</Text>
         <Text style={styles.bootError}>Could not reach plato.stanford.edu.{'\n'}Check your connection and relaunch.</Text>
       </View>
     );
@@ -152,6 +156,8 @@ export default function App() {
           <Stack.Screen name="History" component={HistoryScreen} />
           <Stack.Screen name="ReadingList" component={ReadingListScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
+          <Stack.Screen name="Annotations" component={AnnotationsScreen} />
+          <Stack.Screen name="Graph" component={GraphScreen} />
         </Stack.Navigator>
       </NavigationContainer>
       {downloadProgress && (
@@ -177,10 +183,9 @@ const styles = StyleSheet.create({
   },
   bootLogo: {
     color: '#7ba4ff',
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 4,
-    textTransform: 'uppercase',
+    fontSize: 26,
+    fontWeight: '400',
+    letterSpacing: 6,
   },
   bootLabel: { color: '#444', fontSize: 13, marginTop: 12 },
   bootError: { color: '#666', fontSize: 14, marginTop: 24, textAlign: 'center', lineHeight: 22, paddingHorizontal: 40 },

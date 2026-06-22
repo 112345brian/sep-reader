@@ -265,6 +265,12 @@ export default function ArticleScreen() {
           <TouchableOpacity onPress={handleBookmark} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <BookmarkIcon active={bookmarked} size={22} />
           </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle })}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.actionIcon}>◎</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={handleShare} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Text style={styles.actionIcon}>⬆</Text>
           </TouchableOpacity>

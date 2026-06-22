@@ -273,6 +273,10 @@ export default function SettingsScreen() {
         </Section>
 
         <Text style={styles.version}>Nous · v0.1.0</Text>
+        <Text style={styles.attribution}>
+          Powered by the Stanford Encyclopedia of Philosophy
+        </Text>
+        <Text style={styles.attributionUrl}>plato.stanford.edu</Text>
       </ScrollView>
     </View>
   );
@@ -350,6 +354,8 @@ const styles = StyleSheet.create({
 
   hint: { color: '#444', fontSize: 12, lineHeight: 17, paddingHorizontal: 16, paddingBottom: 14 },
   version: { color: '#333', fontSize: 12, textAlign: 'center', marginTop: 40 },
+  attribution: { color: '#2a2a2a', fontSize: 11, textAlign: 'center', marginTop: 6 },
+  attributionUrl: { color: '#252525', fontSize: 10, textAlign: 'center', marginTop: 2, marginBottom: 8 },
 
   fontSizePicker: { flexDirection: 'row', gap: 6 },
   fontSizeOption: {

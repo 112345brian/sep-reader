@@ -541,9 +541,53 @@ export async function getAnnotationsForSlug(slug: string): Promise<Annotation[]>
   );
 }
 
-export async function getAllAnnotations(): Promise<Annotation[]> {
+export interface AnnotationWithTitle extends Annotation {
+  article_title: string | null;
+}
+
+export async function getAllAnnotations(): Promise<AnnotationWithTitle[]> {
   const db = await getDb();
-  return db.getAllAsync<Annotation>('SELECT * FROM annotations ORDER BY created_at ASC');
+  return db.getAllAsync<AnnotationWithTitle>(`
+    SELECT a.*, e.title as article_title
+    FROM annotations a
+    LEFT JOIN entries e ON e.slug = a.slug
+    ORDER BY a.created_at DESC
+  `);
+}
+
+// ── Graph view ────────────────────────────────────────────────────────────────
+
+export interface GraphNode { slug: string; title: string; read: boolean; }
+export interface GraphEdge { from_slug: string; to_slug: string; }
+export interface GraphData { nodes: GraphNode[]; edges: GraphEdge[]; }
+
+export async function getGraphData(): Promise<GraphData> {
+  const db = await getDb();
+  const edges = await db.getAllAsync<GraphEdge>(`
+    SELECT DISTINCT l.from_slug, l.to_slug
+    FROM links l
+    WHERE EXISTS (SELECT 1 FROM reads r WHERE r.slug = l.from_slug)
+    LIMIT 500
+  `);
+  if (edges.length === 0) return { nodes: [], edges: [] };
+
+  const allSlugs = new Set<string>();
+  for (const e of edges) { allSlugs.add(e.from_slug); allSlugs.add(e.to_slug); }
+
+  const readRows = await db.getAllAsync<{slug: string}>('SELECT DISTINCT slug FROM reads');
+  const readSet = new Set(readRows.map(r => r.slug));
+
+  const slugList = Array.from(allSlugs);
+  const titleRows = await db.getAllAsync<{slug: string; title: string}>(
+    `SELECT slug, title FROM entries WHERE slug IN (${slugList.map(() => '?').join(',')})`,
+    slugList
+  );
+  const titleMap = new Map(titleRows.map(r => [r.slug, r.title]));
+
+  return {
+    nodes: slugList.map(slug => ({ slug, title: titleMap.get(slug) ?? slug, read: readSet.has(slug) })),
+    edges,
+  };
 }
 
 // ── JSON user data export / import ───────────────────────────────────────────
