@@ -54,6 +54,14 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       PRIMARY KEY (from_slug, to_slug)
     );
 
+    CREATE TABLE IF NOT EXISTS article_versions (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug         TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      cached_at    INTEGER NOT NULL,
+      UNIQUE(slug, content_hash)
+    );
+
     CREATE TABLE IF NOT EXISTS annotations (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       slug          TEXT NOT NULL,
@@ -120,6 +128,18 @@ export async function cacheArticle(
   const wordCount = countWords(data.content_html ?? '');
   const hash = contentHash(data.content_html ?? '');
   const now = Date.now();
+
+  // Preserve the old version record before overwriting
+  const prev = await db.getFirstAsync<{ content_hash: string | null; cached_at: number | null }>(
+    'SELECT content_hash, cached_at FROM entries WHERE slug = ?', [slug]
+  );
+  if (prev?.content_hash && prev?.cached_at) {
+    await db.runAsync(
+      'INSERT OR IGNORE INTO article_versions (slug, content_hash, cached_at) VALUES (?, ?, ?)',
+      [slug, prev.content_hash, prev.cached_at]
+    );
+  }
+
   await db.runAsync(
     `UPDATE entries SET
        author = ?, pub_date = ?, content_hash = ?,
@@ -130,6 +150,21 @@ export async function cacheArticle(
      data.toc_html ?? null, data.preamble_html ?? null,
      data.content_html ?? null, wordCount, now, slug]
   );
+
+  // Record the new version
+  await db.runAsync(
+    'INSERT OR IGNORE INTO article_versions (slug, content_hash, cached_at) VALUES (?, ?, ?)',
+    [slug, hash, now]
+  );
+}
+
+export async function getArticleVersionDate(slug: string, hash: string): Promise<number | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ cached_at: number }>(
+    'SELECT cached_at FROM article_versions WHERE slug = ? AND content_hash = ?',
+    [slug, hash]
+  );
+  return row?.cached_at ?? null;
 }
 
 export async function getEntry(slug: string): Promise<EntryRow | null> {

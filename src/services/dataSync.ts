@@ -1,7 +1,7 @@
 import { File, Directory, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 import {
-  getSyncFolder, exportUserData, importUserData,
+  getSyncFolder, exportUserData, importUserData, getArticleVersionDate,
   type UserDataExport, type BookmarkRow,
 } from './db';
 import type { Annotation } from '../types';
@@ -79,51 +79,69 @@ export async function exportToZotero(
   item: Pick<BookmarkRow, 'slug' | 'title' | 'author' | 'pub_date'>,
   annotations: Annotation[] = []
 ): Promise<'ok' | 'auth_error' | 'error'> {
-  const baseUrl = `https://api.zotero.org/users/${userId}`;
+  const apiBase = `https://api.zotero.org/users/${userId}`;
   const headers = {
     'Zotero-API-Key': apiKey,
     'Zotero-API-Version': '3',
     'Content-Type': 'application/json',
   };
 
-  // 1. Create the encyclopediaArticle item
+  // Group annotations by content_hash — each unique hash is a separate article version
+  const byVersion = new Map<string, Annotation[]>();
+  for (const ann of annotations) {
+    const key = ann.content_hash ?? '__current__';
+    const bucket = byVersion.get(key) ?? [];
+    bucket.push(ann);
+    byVersion.set(key, bucket);
+  }
+  // If there are no annotations at all, still export one item
+  if (byVersion.size === 0) byVersion.set('__current__', []);
+
   const creators = parseCreators(item.author);
-  const entryItem = {
-    itemType: 'encyclopediaArticle',
-    title: item.title,
-    encyclopediaTitle: 'Stanford Encyclopedia of Philosophy',
-    creators: [
-      ...creators,
-      { creatorType: 'editor', lastName: 'Zalta', firstName: 'Edward N.' },
-      { creatorType: 'editor', lastName: 'Nodelman', firstName: 'Uri' },
-    ],
-    url: `https://plato.stanford.edu/entries/${item.slug}/`,
-    accessDate: new Date().toISOString().slice(0, 10),
-    date: item.pub_date?.replace(/\//g, '-') ?? '',
-    language: 'en',
-  };
+  const today = new Date().toISOString().slice(0, 10);
 
   try {
-    const res = await fetch(`${baseUrl}/items`, {
-      method: 'POST', headers, body: JSON.stringify([entryItem]),
-    });
-    if (res.status === 401 || res.status === 403) return 'auth_error';
-    if (!res.ok) return 'error';
+    for (const [hash, versionAnns] of byVersion) {
+      // Resolve the access date: when we downloaded this specific version
+      let accessDate = today;
+      if (hash !== '__current__') {
+        const ts = await getArticleVersionDate(item.slug, hash);
+        if (ts) accessDate = new Date(ts).toISOString().slice(0, 10);
+      }
 
-    // 2. If there are annotations, create a child note
-    if (annotations.length > 0) {
-      const payload = await res.json();
-      const parentKey = payload?.successful?.['0']?.key;
-      if (parentKey) {
-        const noteHtml = buildAnnotationNote(item.title, annotations);
-        await fetch(`${baseUrl}/items`, {
-          method: 'POST', headers,
-          body: JSON.stringify([{
-            itemType: 'note',
-            parentItem: parentKey,
-            note: noteHtml,
-          }]),
-        });
+      const entryItem = {
+        itemType: 'encyclopediaArticle',
+        title: item.title,
+        encyclopediaTitle: 'Stanford Encyclopedia of Philosophy',
+        creators: [
+          ...creators,
+          { creatorType: 'editor', lastName: 'Zalta', firstName: 'Edward N.' },
+          { creatorType: 'editor', lastName: 'Nodelman', firstName: 'Uri' },
+        ],
+        url: `https://plato.stanford.edu/entries/${item.slug}/`,
+        accessDate,
+        date: item.pub_date?.replace(/\//g, '-') ?? '',
+        language: 'en',
+        // Surface the version hash in Zotero's extra field for traceability
+        extra: hash !== '__current__' ? `Version: ${hash}\nAccessed: ${accessDate}` : `Accessed: ${accessDate}`,
+      };
+
+      const res = await fetch(`${apiBase}/items`, {
+        method: 'POST', headers, body: JSON.stringify([entryItem]),
+      });
+      if (res.status === 401 || res.status === 403) return 'auth_error';
+      if (!res.ok) return 'error';
+
+      if (versionAnns.length > 0) {
+        const payload = await res.json();
+        const parentKey = payload?.successful?.['0']?.key;
+        if (parentKey) {
+          const noteHtml = buildAnnotationNote(item.title, versionAnns, accessDate);
+          await fetch(`${apiBase}/items`, {
+            method: 'POST', headers,
+            body: JSON.stringify([{ itemType: 'note', parentItem: parentKey, note: noteHtml }]),
+          });
+        }
       }
     }
 
@@ -133,13 +151,17 @@ export async function exportToZotero(
   }
 }
 
-function buildAnnotationNote(title: string, annotations: Annotation[]): string {
+function buildAnnotationNote(title: string, annotations: Annotation[], accessDate: string): string {
   const items = annotations.map(a => {
     const swatch = `background:${a.color}44;border-left:3px solid ${a.color};padding:2px 6px;border-radius:2px;`;
     const note = a.note ? `<br/><em style="color:#888;font-size:0.9em">${escHtml(a.note)}</em>` : '';
     return `<li style="${swatch} margin:6px 0;">"${escHtml(a.selected_text)}"${note}</li>`;
   }).join('\n');
-  return `<h3>Highlights: ${escHtml(title)}</h3><ul style="list-style:none;padding:0;">${items}</ul>`;
+  return (
+    `<h3>Highlights: ${escHtml(title)}</h3>` +
+    `<p style="color:#888;font-size:0.85em">Version accessed ${accessDate}</p>` +
+    `<ul style="list-style:none;padding:0;">${items}</ul>`
+  );
 }
 
 function escHtml(s: string): string {

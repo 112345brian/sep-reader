@@ -63,8 +63,10 @@ export default function ReadingListScreen() {
     const annotations = await getAnnotationsForSlug(item.slug);
     const result = await exportToZotero(apiKey, userId, item, annotations);
     if (result === 'ok') {
+      const versionCount = new Set(annotations.map(a => a.content_hash ?? '__current__')).size;
+      const versionNote = versionCount > 1 ? ` across ${versionCount} versions` : '';
       const msg = annotations.length > 0
-        ? `"${item.title}" and ${annotations.length} highlight${annotations.length > 1 ? 's' : ''} added to your Zotero library.`
+        ? `"${item.title}" and ${annotations.length} highlight${annotations.length > 1 ? 's' : ''}${versionNote} added to your Zotero library.`
         : `"${item.title}" was added to your Zotero library.`;
       Alert.alert('Saved to Zotero', msg);
     } else if (result === 'auth_error') {
