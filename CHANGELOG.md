@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.0] — 2026-06-22
+
+### Changed
+- **Blind-design UI overhaul** — new dark theme throughout:
+  - Home: "Nous" wordmark, pill search bar, BOOKMARKS / CONTINUE READING sections, bottom nav (Home · Search · Notes)
+  - Article: minimal 3-button app bar (back · search · overflow), native article header with "STANFORD ENCYCLOPEDIA" label, title, author/year, and annotation count chip
+  - TOC: bottom-sheet triggered by a pill handle; Contents tab for section jumps, Annotations tab with color-coded cards
+  - Annotation modal: color-picker dots, colored save button, delete button
+  - Highlights screen: color-coded left-border cards
+- Reading font size increased from 17 px to 20 px
+
+### Fixed
+- `catalog.ts` entry-list regex was matching nothing — SEP's `contents.html` uses relative hrefs (`entries/foo/`) and wraps titles in `<strong>`. Now correctly finds all 1,837 entries.
+- Annotation tap-to-edit: switched from element-level touch events to `document.touchend` + `elementsFromPoint` for reliable `<mark>` detection on Android WebView
+- FTS search: migrated content table to standalone FTS5 with backfill on startup
+- WebView crash on Android New Architecture (Fabric)
+- Companion JS reader bar removed via DOM at runtime so it doesn't conflict with the native header
+- `LogBox.ignoreAllLogs()` suppresses the dev-mode warning banner that was covering the TOC handle
+
+### Added
+- `scripts/test-download.mjs` — standalone Node script to verify the SEP download pipeline without running the app
+
 ## [0.1.0] — 2026-06-22
 
 ### Added

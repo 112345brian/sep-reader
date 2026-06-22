@@ -82,7 +82,7 @@ async function fetchEntryList(): Promise<{ slug: string; title: string }[]> {
 
   const seen = new Set<string>();
   const entries: { slug: string; title: string }[] = [];
-  const re = /href="\/entries\/([a-z0-9-]+)\/"[^>]*>([^<]+)</g;
+  const re = /href="entries\/([a-z0-9-]+)\/"><strong>([^<]+)<\/strong>/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     const slug = m[1];

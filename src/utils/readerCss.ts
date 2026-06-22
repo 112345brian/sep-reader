@@ -19,7 +19,7 @@ export const READER_CSS = `
     --toc-width:   260px;
     --side-pad:    18px;
     --max-width:   680px;
-    --font-size:   17px;
+    --font-size:   20px;
   }
 
   /* ── Reset ─────────────────────────────────────────── */
@@ -336,7 +336,7 @@ export const READER_CSS = `
   /* ── Mobile ─────────────────────────────────────────── */
   @media (max-width: 768px) {
     :root {
-      --font-size: 17px;
+      --font-size: 20px;
       --side-pad: 16px;
     }
 
