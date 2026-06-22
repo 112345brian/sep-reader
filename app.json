@@ -1,7 +1,20 @@
 {
-  "name": "Nous",
-  "displayName": "Nous",
-  "plugins": [
-    "expo-sqlite"
-  ]
+  "expo": {
+    "name": "Nous",
+    "slug": "nous",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "android": {
+      "package": "com.nous.sepreader",
+      "versionCode": 2
+    },
+    "plugins": [
+      "expo-sqlite"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ce714755-33f9-4035-9379-acab0c77c91b"
+      }
+    }
+  }
 }
