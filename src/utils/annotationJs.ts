@@ -105,6 +105,26 @@ export const ANNOTATION_JS = `
     hideBar();
   }
 
+  // ── Document-level tap handler for marks ─────────────────────────────────
+  // Element-level touch events on inline <mark> nodes are unreliable in Android
+  // WebView. elementsFromPoint (plural) returns the full element stack including
+  // inline children that elementFromPoint (singular) misses.
+  document.addEventListener('touchend', function(e) {
+    var touch = e.changedTouches && e.changedTouches[0];
+    if (!touch) return;
+    var els = document.elementsFromPoint
+      ? document.elementsFromPoint(touch.clientX, touch.clientY)
+      : [document.elementFromPoint(touch.clientX, touch.clientY)];
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      if (el && el.tagName === 'MARK' && el.getAttribute('data-ann-id')) {
+        var id = parseInt(el.getAttribute('data-ann-id'), 10);
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'tap_annotation', id: id }));
+        return;
+      }
+    }
+  }, { passive: true });
+
   // ── Apply / remove highlights ─────────────────────────────────────────────
 
   window.applyAnnotations = function(annotations) {
@@ -143,13 +163,6 @@ export const ANNOTATION_JS = `
         mark.style.cursor = 'pointer';
         mark.style.transition = 'background 0.15s';
         if (ann.note) mark.title = ann.note;
-
-        mark.addEventListener('click', function() {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'tap_annotation',
-            id: ann.id,
-          }));
-        });
 
         range.surroundContents(mark);
       } catch (e) {
