@@ -329,6 +329,10 @@ export const READER_CSS = `
   /* Small top buffer so anchor targets aren't flush against the WebView edge */
   [id] { scroll-margin-top: 1rem; }
 
+  /* Title and preamble are rendered natively above the WebView */
+  h1.pagetitle, .pagetitle { display: none; }
+  #preamble { display: none; }
+
   /* ── Mobile ─────────────────────────────────────────── */
   @media (max-width: 768px) {
     :root {

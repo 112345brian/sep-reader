@@ -33,34 +33,35 @@ export const ANNOTATION_JS = `
     bar = document.createElement('div');
     bar.style.cssText = [
       'position:fixed',
-      'bottom:72px',
+      'bottom:80px',
       'left:50%',
       'transform:translateX(-50%)',
-      'background:#1c1c1e',
-      'border:1px solid #3a3a3c',
-      'border-radius:32px',
-      'padding:8px 18px',
+      'background:#252525',
+      'border:1px solid #2e2e2e',
+      'border-radius:12px',
+      'padding:8px 12px',
       'display:flex',
       'align-items:center',
-      'gap:16px',
+      'gap:8px',
       'z-index:99999',
-      'box-shadow:0 8px 32px rgba(0,0,0,0.7)',
+      'box-shadow:0 8px 24px rgba(0,0,0,0.6)',
       '-webkit-user-select:none',
       'user-select:none',
+      'white-space:nowrap',
     ].join(';');
 
     var COLORS = [
-      '#FFE566',
-      '#FF6B6B',
-      '#66AAFF',
-      '#66DD99',
+      '#fbbf24',
+      '#34d399',
+      '#60a5fa',
+      '#f472b6',
     ];
 
     COLORS.forEach(function(c) {
       var btn = document.createElement('button');
       btn.style.cssText = [
-        'width:22px','height:22px','border-radius:50%',
-        'border:2px solid rgba(255,255,255,0.15)',
+        'width:26px','height:26px','border-radius:50%',
+        'border:2px solid transparent',
         'background:' + c,
         'cursor:pointer','padding:0','flex-shrink:0',
       ].join(';');
@@ -70,14 +71,15 @@ export const ANNOTATION_JS = `
     });
 
     var divider = document.createElement('div');
-    divider.style.cssText = 'width:1px;height:18px;background:#3a3a3c;flex-shrink:0;';
+    divider.style.cssText = 'width:1px;height:22px;background:#2e2e2e;flex-shrink:0;';
     bar.appendChild(divider);
 
     var noteBtn = document.createElement('button');
-    noteBtn.innerHTML = '&#9998;';
+    noteBtn.innerHTML = 'Note';
     noteBtn.style.cssText = [
-      'background:none','border:none','color:#7ba4ff',
-      'font-size:17px','cursor:pointer','padding:0 2px','line-height:1',
+      'background:none','border:none','color:#9a9a9a',
+      'font-size:12px','font-weight:500','cursor:pointer',
+      'padding:4px 6px','line-height:1','border-radius:6px',
     ].join(';');
     noteBtn.title = 'Add note';
     noteBtn.addEventListener('mousedown', function(e) { e.preventDefault(); send('annotate', '#FFE566'); });

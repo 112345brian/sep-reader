@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator,
-  TouchableOpacity, Share, Linking,
+  TouchableOpacity, Share, Linking, Pressable,
 } from 'react-native';
+import Svg, { Path, Circle } from 'react-native-svg';
 import WebView from 'react-native-webview';
 import type { WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,8 +17,8 @@ import {
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
-import BookmarkIcon from '../components/BookmarkIcon';
 import AnnotationModal from '../components/AnnotationModal';
+import TocSheet from '../components/TocSheet';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
 import type { EntryRow, Annotation } from '../types';
 import { contentHash } from '../services/db';
@@ -32,7 +33,6 @@ type LoadState =
   | { phase: 'ready'; html: string; entry: EntryRow }
   | { phase: 'error'; message: string };
 
-// Pending annotation before it's saved (from WebView selection)
 interface PendingAnnotation {
   selected_text: string;
   context: string | null;
@@ -40,6 +40,74 @@ interface PendingAnnotation {
 }
 
 const SEP_BASE = 'https://plato.stanford.edu';
+
+// ── Icon helpers ───────────────────────────────────────────────────────────
+
+function IBtn({ onPress, children }: { onPress: () => void; children: React.ReactNode }) {
+  return (
+    <TouchableOpacity style={styles.iBtn} onPress={onPress} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+      {children}
+    </TouchableOpacity>
+  );
+}
+
+function IconBack({ color = '#9a9a9a' }: { color?: string }) {
+  return (
+    <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M19 12H5M12 5l-7 7 7 7" />
+    </Svg>
+  );
+}
+
+function IconSearch({ color = '#9a9a9a' }: { color?: string }) {
+  return (
+    <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Circle cx="11" cy="11" r="7" />
+      <Path d="m21 21-4.35-4.35" />
+    </Svg>
+  );
+}
+
+function IconDots({ color = '#9a9a9a' }: { color?: string }) {
+  return (
+    <Svg width={21} height={21} viewBox="0 0 24 24" fill={color} stroke="none">
+      <Circle cx="12" cy="5" r="1.5" />
+      <Circle cx="12" cy="12" r="1.5" />
+      <Circle cx="12" cy="19" r="1.5" />
+    </Svg>
+  );
+}
+
+function IconBookmark({ active = false }: { active?: boolean }) {
+  return (
+    <Svg width={21} height={21} viewBox="0 0 24 24" fill={active ? '#e03030' : 'none'} stroke={active ? '#e03030' : '#9a9a9a'} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+    </Svg>
+  );
+}
+
+function IconShare({ color = '#9a9a9a' }: { color?: string }) {
+  return (
+    <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+      <Path d="M16 6l-4-4-4 4" />
+      <Path d="M12 2v13" />
+    </Svg>
+  );
+}
+
+function IconGraph({ color = '#9a9a9a' }: { color?: string }) {
+  return (
+    <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Circle cx="18" cy="5" r="3" />
+      <Circle cx="6" cy="12" r="3" />
+      <Circle cx="18" cy="19" r="3" />
+      <Path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98" />
+    </Svg>
+  );
+}
+
+// ── Component ──────────────────────────────────────────────────────────────
 
 export default function ArticleScreen() {
   const insets = useSafeAreaInsets();
@@ -52,8 +120,9 @@ export default function ArticleScreen() {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [orphaned, setOrphaned] = useState<Annotation[]>([]);
   const [orphanDismissed, setOrphanDismissed] = useState(false);
+  const [showToc, setShowToc] = useState(false);
+  const [showOverflow, setShowOverflow] = useState(false);
 
-  // Annotation modal state
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
   const modalAnnotation =
@@ -119,12 +188,9 @@ export default function ArticleScreen() {
     });
   }
 
-  // After WebView loads, inject existing annotations
   const handleLoadEnd = useCallback(() => {
     setWebReady(true);
-    if (annotations.length > 0) {
-      injectAnnotations(annotations);
-    }
+    if (annotations.length > 0) injectAnnotations(annotations);
   }, [annotations]);
 
   function injectAnnotations(anns: Annotation[]) {
@@ -133,16 +199,12 @@ export default function ArticleScreen() {
     );
   }
 
-  // ── WebView message handler ───────────────────────────────────────────────
-
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === 'highlight') {
-        // Save immediately with no note, apply highlight visually
         handleSaveAnnotation(msg.text, msg.context, msg.color, null);
       } else if (msg.type === 'annotate') {
-        // Open modal for user to add a note
         setPendingAnnotation({ selected_text: msg.text, context: msg.context, color: msg.color });
       } else if (msg.type === 'tap_annotation') {
         const ann = annotations.find(a => a.id === msg.id);
@@ -158,7 +220,6 @@ export default function ArticleScreen() {
     const ann = await saveAnnotation(slug, text, context, color, note, currentHash);
     const updated = [...annotations, ann];
     setAnnotations(updated);
-    // Apply only the new annotation to avoid re-running all
     injectAnnotations([ann]);
     setPendingAnnotation(null);
   }
@@ -170,7 +231,6 @@ export default function ArticleScreen() {
         a.id === editingAnnotation.id ? { ...a, note, color, updated_at: Date.now() } : a
       );
       setAnnotations(updated);
-      // Remove and re-apply just this annotation with updated color
       webRef.current?.injectJavaScript(
         `window.removeAnnotation(${editingAnnotation.id}); window.applyAnnotations([${JSON.stringify({ ...editingAnnotation, note, color })}]); true;`
       );
@@ -185,13 +245,9 @@ export default function ArticleScreen() {
     await deleteAnnotation(editingAnnotation.id);
     const updated = annotations.filter(a => a.id !== editingAnnotation.id);
     setAnnotations(updated);
-    webRef.current?.injectJavaScript(
-      `window.removeAnnotation(${editingAnnotation.id}); true;`
-    );
+    webRef.current?.injectJavaScript(`window.removeAnnotation(${editingAnnotation.id}); true;`);
     setEditingAnnotation(null);
   }
-
-  // ── Nav ───────────────────────────────────────────────────────────────────
 
   const handleNav = useCallback((req: WebViewNavigation): boolean => {
     const url = req.url;
@@ -213,8 +269,6 @@ export default function ArticleScreen() {
     return false;
   }, [slug, nav]);
 
-  // ── Header actions ────────────────────────────────────────────────────────
-
   const handleShare = async () => {
     const articleTitle = state.phase === 'ready' ? state.entry.title : title;
     await Share.share({
@@ -229,60 +283,65 @@ export default function ArticleScreen() {
     setBookmarked(await toggleBookmark(slug, articleTitle));
   };
 
+  const handleTocJump = (href: string) => {
+    webRef.current?.injectJavaScript(
+      `(function(){var el=document.getElementById(${JSON.stringify(href)});if(el)el.scrollIntoView({behavior:'smooth'});})();true;`
+    );
+  };
+
   const displayTitle = state.phase === 'ready' ? state.entry.title : title;
+  const entry = state.phase === 'ready' ? state.entry : null;
   const annCount = annotations.length;
+
+  const readMin = entry?.word_count ? Math.ceil(entry.word_count / 200) : null;
+  const year = entry?.pub_date?.slice(0, 4) ?? null;
 
   return (
     <View style={styles.root}>
-      <View style={[styles.header, { paddingTop: insets.top }]}>
-        <TouchableOpacity
-          style={styles.back}
-          onPress={() => nav.goBack()}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Text style={styles.backChevron}>‹</Text>
-          <Text style={styles.backLabel}>Library</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.headerTitle} numberOfLines={1}>{displayTitle}</Text>
-
-        <View style={styles.actions}>
-          {annCount > 0 && (
-            <TouchableOpacity
-              onPress={() => nav.navigate('Annotations')}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <View style={styles.annBadge}>
-                <Text style={styles.annBadgeText}>{annCount}</Text>
-              </View>
-            </TouchableOpacity>
-          )}
-          {state.phase === 'ready' && !!state.entry.toc_html && webReady && (
-            <TouchableOpacity
-              onPress={() => webRef.current?.injectJavaScript('window.openToc && window.openToc(); true;')}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.actionIcon}>≡</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity onPress={handleBookmark} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <BookmarkIcon active={bookmarked} size={22} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleShare} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={styles.actionIcon}>⬆</Text>
-          </TouchableOpacity>
-        </View>
+      {/* ── App bar ── */}
+      <View style={[styles.appBar, { paddingTop: insets.top }]}>
+        <IBtn onPress={() => nav.goBack()}>
+          <IconBack />
+        </IBtn>
+        <View style={{ flex: 1 }} />
+        <IBtn onPress={() => nav.goBack()}>
+          <IconSearch />
+        </IBtn>
+        <IBtn onPress={() => setShowOverflow(v => !v)}>
+          <IconDots />
+        </IBtn>
       </View>
 
-      {state.phase === 'loading' && (
-        <View style={styles.center}>
-          <ActivityIndicator color="#7ba4ff" size="large" />
-        </View>
+      {/* ── Overflow menu ── */}
+      {showOverflow && (
+        <>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowOverflow(false)} />
+          <View style={[styles.overflow, { top: insets.top + 52 }]}>
+            <TouchableOpacity style={styles.overflowItem} onPress={() => { handleBookmark(); setShowOverflow(false); }}>
+              <IconBookmark active={bookmarked} />
+              <Text style={styles.overflowLabel}>{bookmarked ? 'Bookmarked' : 'Bookmark'}</Text>
+            </TouchableOpacity>
+            <View style={styles.overflowSep} />
+            <TouchableOpacity style={styles.overflowItem} onPress={() => { handleShare(); setShowOverflow(false); }}>
+              <IconShare />
+              <Text style={styles.overflowLabel}>Share</Text>
+            </TouchableOpacity>
+            <View style={styles.overflowSep} />
+            <TouchableOpacity style={styles.overflowItem} onPress={() => { setShowOverflow(false); nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle }); }}>
+              <IconGraph />
+              <Text style={styles.overflowLabel}>View graph</Text>
+            </TouchableOpacity>
+          </View>
+        </>
       )}
-      {state.phase === 'fetching' && (
+
+      {/* ── Loading states ── */}
+      {(state.phase === 'loading' || state.phase === 'fetching') && (
         <View style={styles.center}>
-          <ActivityIndicator color="#7ba4ff" size="large" />
-          <Text style={styles.fetchingLabel}>Loading article…</Text>
+          <ActivityIndicator color="#5b8ef5" size="large" />
+          {state.phase === 'fetching' && (
+            <Text style={styles.fetchingLabel}>Loading article…</Text>
+          )}
         </View>
       )}
       {state.phase === 'error' && (
@@ -293,49 +352,106 @@ export default function ArticleScreen() {
           </TouchableOpacity>
         </View>
       )}
-      {state.phase === 'ready' && orphaned.length > 0 && !orphanDismissed && (
-        <OrphanedAnnotationsBanner
-          annotations={orphaned}
-          currentContent={state.entry.content_html ?? ''}
-          currentHash={contentHash(state.entry.content_html ?? '')}
-          onResolved={(ids) => {
-            // Move resolved IDs from orphaned; re-anchored ones go back into annotations
-            setOrphaned(prev => prev.filter(a => !ids.includes(a.id)));
-            // Re-fetch to get updated selected_text for re-anchored ones
-            getAnnotationsForSlug(slug).then(all => {
-              const currentHash = contentHash(state.entry.content_html ?? '');
-              setAnnotations(all.filter(a => (state.entry.content_html ?? '').includes(a.selected_text)));
-              injectAnnotations(all.filter(a => (state.entry.content_html ?? '').includes(a.selected_text)));
-            });
-          }}
-          onDismiss={() => setOrphanDismissed(true)}
-        />
-      )}
 
       {state.phase === 'ready' && (
-        <View style={styles.webWrap}>
-          {!webReady && (
-            <View style={styles.webOverlay}>
-              <ActivityIndicator color="#7ba4ff" />
+        <>
+          {/* ── Native article header ── */}
+          <View style={styles.articleHeader}>
+            <Text style={styles.articleCategory}>STANFORD ENCYCLOPEDIA</Text>
+            <Text style={styles.articleTitle}>{displayTitle}</Text>
+            <View style={styles.articleMeta}>
+              {entry?.author ? (
+                <Text style={styles.articleMetaText}>{entry.author}</Text>
+              ) : null}
+              {entry?.author && (year || readMin) ? (
+                <Text style={styles.articleMetaDot}>·</Text>
+              ) : null}
+              {year ? (
+                <Text style={styles.articleMetaText}>{year}</Text>
+              ) : null}
+              {year && readMin ? (
+                <Text style={styles.articleMetaDot}>·</Text>
+              ) : null}
+              {readMin ? (
+                <Text style={styles.articleMetaText}>{readMin} min</Text>
+              ) : null}
+              {annCount > 0 && (
+                <TouchableOpacity
+                  style={styles.annChip}
+                  onPress={() => nav.navigate('Annotations')}
+                >
+                  <Text style={styles.annChipText}>{annCount} notes</Text>
+                </TouchableOpacity>
+              )}
             </View>
+          </View>
+
+          {/* ── Orphan banner ── */}
+          {orphaned.length > 0 && !orphanDismissed && (
+            <OrphanedAnnotationsBanner
+              annotations={orphaned}
+              currentContent={state.entry.content_html ?? ''}
+              currentHash={contentHash(state.entry.content_html ?? '')}
+              onResolved={(ids) => {
+                setOrphaned(prev => prev.filter(a => !ids.includes(a.id)));
+                getAnnotationsForSlug(slug).then(all => {
+                  const hash = contentHash(state.entry.content_html ?? '');
+                  const valid = all.filter(a => (state.entry.content_html ?? '').includes(a.selected_text));
+                  setAnnotations(valid);
+                  injectAnnotations(valid);
+                });
+              }}
+              onDismiss={() => setOrphanDismissed(true)}
+            />
           )}
-          <WebView
-            ref={webRef}
-            source={{ html: state.html, baseUrl: SEP_BASE }}
-            style={styles.web}
-            originWhitelist={['*']}
-            onShouldStartLoadWithRequest={handleNav}
-            onLoadEnd={handleLoadEnd}
-            onMessage={handleMessage}
-            javaScriptEnabled
-            domStorageEnabled
-            scrollEnabled
-            showsVerticalScrollIndicator={false}
-            scalesPageToFit={false}
-            textZoom={100}
-            androidLayerType="hardware"
-          />
-        </View>
+
+          {/* ── WebView ── */}
+          <View style={styles.webWrap}>
+            {/* Left edge accent — pointer-events none so WebView gets touches */}
+            <View style={styles.edgeAccent} pointerEvents="none" />
+            {!webReady && (
+              <View style={styles.webOverlay}>
+                <ActivityIndicator color="#5b8ef5" />
+              </View>
+            )}
+            <WebView
+              ref={webRef}
+              source={{ html: state.html, baseUrl: SEP_BASE }}
+              style={styles.web}
+              originWhitelist={['*']}
+              onShouldStartLoadWithRequest={handleNav}
+              onLoadEnd={handleLoadEnd}
+              onMessage={handleMessage}
+              javaScriptEnabled
+              domStorageEnabled
+              scrollEnabled
+              showsVerticalScrollIndicator={false}
+              scalesPageToFit={false}
+              textZoom={100}
+              androidLayerType="hardware"
+            />
+          </View>
+
+          {/* Swipe-up TOC handle — sits OUTSIDE webWrap so it receives native touches */}
+          <TouchableOpacity
+            style={styles.tocHandle}
+            onPress={() => setShowToc(true)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.tocHandlePill} />
+          </TouchableOpacity>
+
+          {/* ── TOC Sheet ── */}
+          {showToc && (
+            <TocSheet
+              tocHtml={state.entry.toc_html}
+              annotations={annotations}
+              onClose={() => setShowToc(false)}
+              onTocJump={handleTocJump}
+              onAnnotationTap={(ann) => setEditingAnnotation(ann)}
+            />
+          )}
+        </>
       )}
 
       <AnnotationModal
@@ -352,31 +468,122 @@ export default function ArticleScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#121212' },
-  header: {
+  root: { flex: 1, backgroundColor: '#111' },
+
+  appBar: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingBottom: 8,
+    alignItems: 'center',
     paddingHorizontal: 4,
+    height: undefined,
+    paddingBottom: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#2a2a2a',
-    minHeight: 44,
+    borderBottomColor: '#1e1e1e',
   },
-  back: { flexDirection: 'row', alignItems: 'center', minWidth: 80, paddingHorizontal: 8 },
-  backChevron: { color: '#7ba4ff', fontSize: 28, lineHeight: 28, marginRight: 1 },
-  backLabel: { color: '#7ba4ff', fontSize: 16 },
-  headerTitle: { flex: 1, color: '#e8e8e8', fontSize: 15, fontWeight: '600', textAlign: 'center' },
-  actions: { flexDirection: 'row', alignItems: 'center', minWidth: 80, justifyContent: 'flex-end', paddingHorizontal: 8, gap: 14 },
-  actionIcon: { color: '#555', fontSize: 18 },
-  actionDisabled: { opacity: 0.3 },
-  annBadge: { backgroundColor: '#7ba4ff22', borderRadius: 8, paddingHorizontal: 5, paddingVertical: 2 },
-  annBadgeText: { color: '#7ba4ff', fontSize: 11, fontWeight: '600' },
-  webWrap: { flex: 1 },
-  web: { flex: 1, backgroundColor: '#121212' },
-  webOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#121212', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
+  iBtn: {
+    width: 42, height: 42,
+    alignItems: 'center', justifyContent: 'center',
+    borderRadius: 21,
+  },
+
+  overflow: {
+    position: 'absolute',
+    right: 8,
+    backgroundColor: '#252525',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2e2e2e',
+    zIndex: 100,
+    minWidth: 160,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.6,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  overflowItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+  },
+  overflowLabel: { fontSize: 14, color: '#d0d0d0' },
+  overflowSep: { height: StyleSheet.hairlineWidth, backgroundColor: '#2e2e2e', marginHorizontal: 12 },
+
+  articleHeader: {
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#1e1e1e',
+  },
+  articleCategory: {
+    fontSize: 11, fontWeight: '600',
+    letterSpacing: 0.08 * 11,
+    textTransform: 'uppercase',
+    color: '#5b8ef5',
+    marginBottom: 8,
+  },
+  articleTitle: {
+    fontSize: 24, fontWeight: '700',
+    lineHeight: 30, letterSpacing: -0.02 * 24,
+    color: '#e4e4e4',
+    marginBottom: 10,
+  },
+  articleMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  articleMetaText: { fontSize: 12, color: '#555' },
+  articleMetaDot: { fontSize: 12, color: '#333' },
+  annChip: {
+    marginLeft: 'auto' as any,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: 'rgba(91,142,245,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(91,142,245,0.35)',
+  },
+  annChipText: { fontSize: 11, fontWeight: '500', color: '#5b8ef5' },
+
+  webWrap: { flex: 1, position: 'relative' },
+  edgeAccent: {
+    position: 'absolute',
+    left: 0, top: 0, bottom: 0,
+    width: 3,
+    backgroundColor: 'rgba(91,142,245,0.35)',
+    zIndex: 5,
+    pointerEvents: 'none',
+  } as any,
+  web: { flex: 1, backgroundColor: '#111' },
+  webOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#111',
+    alignItems: 'center', justifyContent: 'center', zIndex: 10,
+  },
+
+  tocHandle: {
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#1e1e1e',
+  },
+  tocHandlePill: {
+    width: 40, height: 4,
+    backgroundColor: '#333',
+    borderRadius: 2,
+  },
+
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
   fetchingLabel: { color: '#555', fontSize: 14 },
   errorText: { color: '#888', fontSize: 15, textAlign: 'center', paddingHorizontal: 32 },
   retryBtn: { paddingVertical: 10, paddingHorizontal: 24, borderRadius: 8, borderWidth: 1, borderColor: '#333' },
-  retryLabel: { color: '#7ba4ff', fontSize: 15 },
+  retryLabel: { color: '#5b8ef5', fontSize: 15 },
 });
