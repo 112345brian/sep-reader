@@ -326,8 +326,8 @@ export const READER_CSS = `
     margin: 2rem 0;
   }
 
-  /* Scroll offset so headings aren't hidden under the injected reader bar */
-  [id] { scroll-margin-top: 3.5rem; }
+  /* Small top buffer so anchor targets aren't flush against the WebView edge */
+  [id] { scroll-margin-top: 1rem; }
 
   /* ── Mobile ─────────────────────────────────────────── */
   @media (max-width: 768px) {
@@ -350,7 +350,7 @@ export const READER_CSS = `
 
     #article {
       margin-left: 0;
-      padding-top: 3rem;
+      padding-top: 0;
     }
 
     #article-content {

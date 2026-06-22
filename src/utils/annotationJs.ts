@@ -171,5 +171,16 @@ export const ANNOTATION_JS = `
       break;
     }
   }
+
+  // ── Native app: suppress companion JS elements that duplicate native UI ──
+  // The reader bar (fixed top bar) is always-visible on mobile per the companion
+  // JS, but Nous already provides a native header. Override after SEP_JS runs so
+  // our !important beats the companion JS's !important (later source order wins).
+  var _s = document.createElement('style');
+  _s.textContent =
+    '#sep-reader-bar{display:none!important}' +
+    'html{scroll-padding-top:0!important}' +
+    '[id],a[name],:target{scroll-margin-top:1rem!important}';
+  document.head.appendChild(_s);
 })();
 `;
