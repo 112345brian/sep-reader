@@ -9,7 +9,8 @@
       "versionCode": 2
     },
     "plugins": [
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-asset"
     ],
     "extra": {
       "eas": {
