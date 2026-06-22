@@ -248,28 +248,25 @@ export default function ArticleScreen() {
 
         <View style={styles.actions}>
           {annCount > 0 && (
-            <View style={styles.annBadge}>
-              <Text style={styles.annBadgeText}>{annCount}</Text>
-            </View>
+            <TouchableOpacity
+              onPress={() => nav.navigate('Annotations')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <View style={styles.annBadge}>
+                <Text style={styles.annBadgeText}>{annCount}</Text>
+              </View>
+            </TouchableOpacity>
           )}
-          <TouchableOpacity
-            onPress={() => load(true)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            disabled={state.phase === 'fetching' || state.phase === 'loading'}
-          >
-            <Text style={[
-              styles.actionIcon,
-              (state.phase === 'fetching' || state.phase === 'loading') && styles.actionDisabled,
-            ]}>↻</Text>
-          </TouchableOpacity>
+          {state.phase === 'ready' && !!state.entry.toc_html && webReady && (
+            <TouchableOpacity
+              onPress={() => webRef.current?.injectJavaScript('window.openToc && window.openToc(); true;')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.actionIcon}>≡</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity onPress={handleBookmark} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <BookmarkIcon active={bookmarked} size={22} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle })}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Text style={styles.actionIcon}>◎</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={handleShare} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Text style={styles.actionIcon}>⬆</Text>

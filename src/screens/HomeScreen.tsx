@@ -53,6 +53,8 @@ export default function HomeScreen() {
     nav.navigate('Article', { slug, title });
 
   const isSearching = query.trim().length > 0;
+  const bookmarkSlugs = new Set(bookmarks.map(b => b.slug));
+  const recentHistory = history.filter(h => !bookmarkSlugs.has(h.slug));
 
   return (
     <View style={styles.root}>
@@ -69,7 +71,7 @@ export default function HomeScreen() {
               <Text style={styles.headerAction}>Graph</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => nav.navigate('ReadingList')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.headerAction}>Saved</Text>
+              <Text style={styles.headerAction}>Bookmarks</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => nav.navigate('Settings')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={styles.headerAction}>⚙</Text>
@@ -106,7 +108,7 @@ export default function HomeScreen() {
         />
       ) : (
         <FlatList
-          data={history}
+          data={recentHistory}
           keyExtractor={i => i.slug}
           renderItem={({ item }) => <Row item={item} onPress={open} showCached />}
           contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
@@ -117,9 +119,9 @@ export default function HomeScreen() {
                 {bookmarks.map(item => (
                   <Row key={item.slug} item={item} onPress={open} showCached />
                 ))}
-                {history.length > 0 && <Text style={styles.sectionLabel}>Recent</Text>}
+                {recentHistory.length > 0 && <Text style={styles.sectionLabel}>Recent</Text>}
               </View>
-            ) : history.length > 0 ? (
+            ) : recentHistory.length > 0 ? (
               <Text style={styles.sectionLabel}>Recent</Text>
             ) : (
               <Text style={styles.hint}>
@@ -128,7 +130,7 @@ export default function HomeScreen() {
             )
           }
           ListFooterComponent={
-            history.length > 0
+            recentHistory.length > 0
               ? <TouchableOpacity
                   style={styles.browseBtn}
                   onPress={() => handleSearch(' ')}

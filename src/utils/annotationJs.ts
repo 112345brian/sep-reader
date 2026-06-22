@@ -125,6 +125,15 @@ export const ANNOTATION_JS = `
     }
   }, { passive: true });
 
+  // ── TOC open (called from native header button) ───────────────────────────
+  window.openToc = function() {
+    var toc = document.getElementById('toc');
+    if (!toc) return;
+    toc.classList.add('toc-open');
+    var bd = document.getElementById('sep-mobile-backdrop');
+    if (bd) bd.classList.add('visible');
+  };
+
   // ── Apply / remove highlights ─────────────────────────────────────────────
 
   window.applyAnnotations = function(annotations) {

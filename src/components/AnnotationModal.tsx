@@ -23,7 +23,6 @@ export default function AnnotationModal({ annotation, onSave, onDelete, onClose 
     if (annotation) {
       setNote(annotation.note ?? '');
       setColor(annotation.color ?? '#FFE566');
-      setTimeout(() => inputRef.current?.focus(), 200);
     }
   }, [annotation]);
 

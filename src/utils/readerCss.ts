@@ -350,7 +350,7 @@ export const READER_CSS = `
 
     #article {
       margin-left: 0;
-      padding-top: 0;
+      padding-top: 0.75rem;
     }
 
     #article-content {
