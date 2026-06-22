@@ -19,6 +19,36 @@ export async function refreshIndexIfStale(): Promise<void> {
   }
 }
 
+export type DownloadProgress = {
+  done: number;
+  total: number;
+  current: string;
+};
+
+export async function downloadAll(
+  onProgress: (p: DownloadProgress) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const { getEntryCount } = await import('./db');
+  // We already have the index; fetch all uncached slugs
+  const { getAllUncachedSlugs } = await import('./db');
+  const slugs = await getAllUncachedSlugs();
+  const total = slugs.length;
+  let done = 0;
+
+  const CONCURRENCY = 4;
+  for (let i = 0; i < slugs.length; i += CONCURRENCY) {
+    if (signal?.aborted) return;
+    const chunk = slugs.slice(i, i + CONCURRENCY);
+    await Promise.all(chunk.map(async ({ slug, title }) => {
+      await fetchAndCacheArticle(slug);
+      done++;
+      onProgress({ done, total, current: title });
+    }));
+    await new Promise<void>(r => setTimeout(r, 300));
+  }
+}
+
 export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
   try {
     const res = await fetch(`${BASE}/entries/${slug}/`);

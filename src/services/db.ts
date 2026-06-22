@@ -237,6 +237,39 @@ export async function setMeta(key: string, value: string): Promise<void> {
   );
 }
 
+export interface Prefs {
+  homeMode: 'search' | 'continue';
+  downloadAll: boolean;
+}
+
+export async function getPrefs(): Promise<Prefs> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ key: string; value: string }>(
+    "SELECT key, value FROM meta WHERE key IN ('pref_home', 'pref_download_all')"
+  );
+  const map = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  return {
+    homeMode: (map['pref_home'] as Prefs['homeMode']) ?? 'search',
+    downloadAll: map['pref_download_all'] === 'true',
+  };
+}
+
+export async function savePrefs(prefs: Prefs): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_home', ?)", [prefs.homeMode]);
+    await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_download_all', ?)", [String(prefs.downloadAll)]);
+    await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('onboarding_done', 'true')");
+  });
+}
+
+export async function getAllUncachedSlugs(): Promise<{ slug: string; title: string }[]> {
+  const db = await getDb();
+  return db.getAllAsync<{ slug: string; title: string }>(
+    'SELECT slug, title FROM entries WHERE cached_at IS NULL ORDER BY title ASC'
+  );
+}
+
 function countWords(html: string): number {
   return html.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).filter(Boolean).length;
 }

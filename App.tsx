@@ -1,13 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { getEntryCount } from './src/services/db';
-import { refreshIndexIfStale } from './src/services/catalog';
+import type { NavigationContainerRef } from '@react-navigation/native';
+import { getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services/db';
+import { refreshIndexIfStale, downloadAll } from './src/services/catalog';
+import type { Prefs } from './src/services/db';
 import HomeScreen from './src/screens/HomeScreen';
 import ArticleScreen from './src/screens/ArticleScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
+import OnboardingScreen from './src/screens/OnboardingScreen';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -35,47 +38,108 @@ const THEME = {
   },
 };
 
+type AppPhase = 'booting' | 'onboarding' | 'indexing' | 'ready';
+
 export default function App() {
-  // Three states: 'booting' | 'indexing' | 'ready'
-  const [phase, setPhase] = useState<'booting' | 'indexing' | 'ready'>('booting');
+  const [phase, setPhase] = useState<AppPhase>('booting');
+  const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
+  const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
   useEffect(() => {
-    (async () => {
-      const count = await getEntryCount();
-      if (count === 0) {
-        setPhase('indexing');
-        await refreshIndexIfStale();
-      } else {
-        // Already have entries — go straight to ready, refresh index in background
-        refreshIndexIfStale();
-      }
-      setPhase('ready');
-    })();
+    boot();
   }, []);
 
-  if (phase !== 'ready') {
+  async function boot() {
+    const onboardingDone = await getMeta('onboarding_done');
+    if (!onboardingDone) {
+      setPhase('onboarding');
+      return;
+    }
+    await initialize(await getPrefs());
+  }
+
+  async function initialize(prefs: Prefs) {
+    const count = await getEntryCount();
+
+    if (count === 0) {
+      setPhase('indexing');
+      await refreshIndexIfStale();
+    } else {
+      refreshIndexIfStale(); // background
+    }
+
+    setPhase('ready');
+
+    // After nav is ready, handle "continue" mode
+    if (prefs.homeMode === 'continue') {
+      const recent = await getRecentSlugs(1);
+      if (recent.length > 0) {
+        setTimeout(() => {
+          navRef.current?.navigate('Article', {
+            slug: recent[0].slug,
+            title: recent[0].title,
+          });
+        }, 100);
+      }
+    }
+
+    // Kick off bulk download in background if user requested it
+    if (prefs.downloadAll) {
+      downloadAll(p => setDownloadProgress(p))
+        .then(() => setDownloadProgress(null));
+    }
+  }
+
+  async function handleOnboardingDone(prefs: Prefs) {
+    setPhase('indexing');
+    await initialize(prefs);
+  }
+
+  if (phase === 'booting') {
     return (
       <View style={styles.boot}>
         <Text style={styles.bootLogo}>SEP</Text>
-        {phase === 'indexing' && (
-          <>
-            <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
-            <Text style={styles.bootLabel}>Building index…</Text>
-          </>
-        )}
+      </View>
+    );
+  }
+
+  if (phase === 'onboarding') {
+    return (
+      <SafeAreaProvider>
+        <OnboardingScreen onDone={handleOnboardingDone} />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (phase === 'indexing') {
+    return (
+      <View style={styles.boot}>
+        <Text style={styles.bootLogo}>SEP</Text>
+        <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
+        <Text style={styles.bootLabel}>Building index…</Text>
       </View>
     );
   }
 
   return (
     <SafeAreaProvider>
-      <NavigationContainer theme={THEME}>
+      <NavigationContainer theme={THEME} ref={navRef}>
         <Stack.Navigator id="root" screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Article" component={ArticleScreen} />
           <Stack.Screen name="History" component={HistoryScreen} />
         </Stack.Navigator>
       </NavigationContainer>
+      {downloadProgress && (
+        <View style={styles.downloadBar}>
+          <View
+            style={[
+              styles.downloadFill,
+              { width: `${(downloadProgress.done / downloadProgress.total) * 100}%` },
+            ]}
+          />
+        </View>
+      )}
     </SafeAreaProvider>
   );
 }
@@ -94,9 +158,15 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
     textTransform: 'uppercase',
   },
-  bootLabel: {
-    color: '#444',
-    fontSize: 13,
-    marginTop: 12,
+  bootLabel: { color: '#444', fontSize: 13, marginTop: 12 },
+  downloadBar: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    height: 2,
+    backgroundColor: '#1a1a1a',
+  },
+  downloadFill: {
+    height: '100%',
+    backgroundColor: '#7ba4ff',
   },
 });
