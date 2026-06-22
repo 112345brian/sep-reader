@@ -39,6 +39,12 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       value TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS bookmarks (
+      slug      TEXT PRIMARY KEY,
+      title     TEXT NOT NULL,
+      saved_at  INTEGER NOT NULL
+    );
+
     CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
       slug UNINDEXED,
       title,
@@ -261,6 +267,47 @@ export async function savePrefs(prefs: Prefs): Promise<void> {
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_download_all', ?)", [String(prefs.downloadAll)]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('onboarding_done', 'true')");
   });
+}
+
+export async function toggleBookmark(slug: string, title: string): Promise<boolean> {
+  const db = await getDb();
+  const existing = await db.getFirstAsync<{ slug: string }>(
+    'SELECT slug FROM bookmarks WHERE slug = ?', [slug]
+  );
+  if (existing) {
+    await db.runAsync('DELETE FROM bookmarks WHERE slug = ?', [slug]);
+    return false;
+  }
+  await db.runAsync(
+    'INSERT INTO bookmarks (slug, title, saved_at) VALUES (?, ?, ?)',
+    [slug, title, Date.now()]
+  );
+  return true;
+}
+
+export async function isBookmarked(slug: string): Promise<boolean> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ slug: string }>(
+    'SELECT slug FROM bookmarks WHERE slug = ?', [slug]
+  );
+  return !!row;
+}
+
+export async function getBookmarks(): Promise<EntrySummary[]> {
+  const db = await getDb();
+  return db.getAllAsync<EntrySummary>(
+    `SELECT b.slug, b.title, e.author, e.cached_at
+     FROM bookmarks b
+     LEFT JOIN entries e USING (slug)
+     ORDER BY b.saved_at DESC`
+  );
+}
+
+export async function clearArticleCache(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'UPDATE entries SET content_html = NULL, toc_html = NULL, preamble_html = NULL, cached_at = NULL'
+  );
 }
 
 export async function getAllUncachedSlugs(): Promise<{ slug: string; title: string }[]> {

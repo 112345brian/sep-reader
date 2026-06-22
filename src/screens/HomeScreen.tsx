@@ -6,7 +6,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { searchEntries, getRecentSlugs } from '../services/db';
+import { searchEntries, getRecentSlugs, getBookmarks } from '../services/db';
 import type { EntrySummary } from '../types';
 import type { RootStackParamList } from '../../App';
 
@@ -19,12 +19,14 @@ export default function HomeScreen() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<EntrySummary[]>([]);
   const [history, setHistory] = useState<EntrySummary[]>([]);
+  const [bookmarks, setBookmarks] = useState<EntrySummary[]>([]);
   const [searching, setSearching] = useState(false);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadHistory = useCallback(async () => {
-    const h = await getRecentSlugs(12);
+    const [h, b] = await Promise.all([getRecentSlugs(12), getBookmarks()]);
     setHistory(h);
+    setBookmarks(b);
   }, []);
 
   useFocusEffect(useCallback(() => {
@@ -59,9 +61,14 @@ export default function HomeScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <View style={styles.headerRow}>
           <Text style={styles.wordmark}>SEP</Text>
-          <TouchableOpacity onPress={() => nav.navigate('History')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={styles.journeyBtn}>Journey</Text>
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <TouchableOpacity onPress={() => nav.navigate('History')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.headerAction}>Journey</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => nav.navigate('Settings')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.headerAction}>⚙</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         <TextInput
           style={styles.search}
@@ -98,11 +105,21 @@ export default function HomeScreen() {
           renderItem={({ item }) => <Row item={item} onPress={open} showCached />}
           contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
           ListHeaderComponent={
-            history.length > 0
-              ? <Text style={styles.sectionLabel}>Recent</Text>
-              : <Text style={styles.hint}>
-                  Search any topic in philosophy.{'\n'}Articles cache for offline reading.
-                </Text>
+            bookmarks.length > 0 ? (
+              <View>
+                <Text style={styles.sectionLabel}>Bookmarks</Text>
+                {bookmarks.map(item => (
+                  <Row key={item.slug} item={item} onPress={open} showCached />
+                ))}
+                {history.length > 0 && <Text style={styles.sectionLabel}>Recent</Text>}
+              </View>
+            ) : history.length > 0 ? (
+              <Text style={styles.sectionLabel}>Recent</Text>
+            ) : (
+              <Text style={styles.hint}>
+                Search any topic in philosophy.{'\n'}Articles cache for offline reading.
+              </Text>
+            )
           }
           ListFooterComponent={
             history.length > 0
@@ -169,10 +186,8 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
     textTransform: 'uppercase',
   },
-  journeyBtn: {
-    color: '#7ba4ff',
-    fontSize: 13,
-  },
+  headerActions: { flexDirection: 'row', gap: 16, alignItems: 'center' },
+  headerAction: { color: '#7ba4ff', fontSize: 13 },
   search: {
     height: 38,
     backgroundColor: '#1a1a1a',

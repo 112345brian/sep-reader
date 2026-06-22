@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs } from './db';
 
 const BASE = 'https://plato.stanford.edu';
 const INDEX_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -29,9 +29,6 @@ export async function downloadAll(
   onProgress: (p: DownloadProgress) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  const { getEntryCount } = await import('./db');
-  // We already have the index; fetch all uncached slugs
-  const { getAllUncachedSlugs } = await import('./db');
   const slugs = await getAllUncachedSlugs();
   const total = slugs.length;
   let done = 0;

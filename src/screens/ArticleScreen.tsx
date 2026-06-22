@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator, TouchableOpacity,
+  View, Text, StyleSheet, ActivityIndicator,
+  TouchableOpacity, Share, Linking,
 } from 'react-native';
 import WebView from 'react-native-webview';
 import type { WebViewNavigation } from 'react-native-webview';
@@ -8,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { getEntry, recordRead } from '../services/db';
+import { getEntry, recordRead, toggleBookmark, isBookmarked } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import type { EntryRow } from '../types';
@@ -20,8 +21,10 @@ type Route = RouteProp<RootStackParamList, 'Article'>;
 type LoadState =
   | { phase: 'loading' }
   | { phase: 'fetching' }
-  | { phase: 'ready'; html: string }
+  | { phase: 'ready'; html: string; entry: EntryRow }
   | { phase: 'error'; message: string };
+
+const SEP_BASE = 'https://plato.stanford.edu';
 
 export default function ArticleScreen() {
   const insets = useSafeAreaInsets();
@@ -30,18 +33,20 @@ export default function ArticleScreen() {
 
   const [state, setState] = useState<LoadState>({ phase: 'loading' });
   const [webReady, setWebReady] = useState(false);
+  const [bookmarked, setBookmarked] = useState(false);
 
   useEffect(() => {
+    isBookmarked(slug).then(setBookmarked);
     load();
   }, [slug]);
 
-  async function load() {
+  async function load(forceRefetch = false) {
     setState({ phase: 'loading' });
     setWebReady(false);
 
-    let entry = await getEntry(slug);
+    let entry = forceRefetch ? null : await getEntry(slug);
 
-    if (!entry?.content_html) {
+    if (!entry?.content_html || forceRefetch) {
       setState({ phase: 'fetching' });
       const ok = await fetchAndCacheArticle(slug);
       if (!ok) {
@@ -59,6 +64,7 @@ export default function ArticleScreen() {
     await recordRead(slug, entry.title, fromSlug);
     setState({
       phase: 'ready',
+      entry,
       html: buildArticleHtml({
         slug: entry.slug,
         title: entry.title,
@@ -73,18 +79,41 @@ export default function ArticleScreen() {
     const url = req.url;
     if (url.startsWith('about:') || url.startsWith('data:')) return true;
 
-    const entry = url.match(/plato\.stanford\.edu\/entries\/([a-z0-9-]+)\//);
-    if (entry) {
-      const target = entry[1];
+    const sepEntry = url.match(/plato\.stanford\.edu\/entries\/([a-z0-9-]+)\//);
+    if (sepEntry) {
+      const target = sepEntry[1];
       if (target !== slug) nav.push('Article', { slug: target, title: target, fromSlug: slug });
       return false;
     }
 
-    // Fragment navigation — allow
-    if (url.includes('#') && !url.includes('plato.stanford.edu')) return true;
+    // Fragment-only navigation within the local document
+    if (url.startsWith('data:') || (url.includes('#') && !url.startsWith('http'))) return true;
+
+    // All other external URLs — open in system browser
+    if (url.startsWith('http')) {
+      Linking.openURL(url).catch(() => {});
+      return false;
+    }
 
     return false;
   }, [slug, nav]);
+
+  const handleShare = async () => {
+    const articleTitle = state.phase === 'ready' ? state.entry.title : title;
+    await Share.share({
+      title: articleTitle,
+      url: `${SEP_BASE}/entries/${slug}/`,
+      message: `${articleTitle} — ${SEP_BASE}/entries/${slug}/`,
+    });
+  };
+
+  const handleBookmark = async () => {
+    const articleTitle = state.phase === 'ready' ? state.entry.title : title;
+    const now = await toggleBookmark(slug, articleTitle);
+    setBookmarked(now);
+  };
+
+  const displayTitle = state.phase === 'ready' ? state.entry.title : title;
 
   return (
     <View style={styles.root}>
@@ -97,8 +126,32 @@ export default function ArticleScreen() {
           <Text style={styles.backChevron}>‹</Text>
           <Text style={styles.backLabel}>Library</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-        <View style={styles.back} />
+
+        <Text style={styles.headerTitle} numberOfLines={1}>{displayTitle}</Text>
+
+        <View style={styles.actions}>
+          <TouchableOpacity
+            onPress={() => load(true)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            disabled={state.phase === 'fetching' || state.phase === 'loading'}
+          >
+            <Text style={[styles.actionIcon, (state.phase === 'fetching' || state.phase === 'loading') && styles.actionDisabled]}>↻</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleBookmark}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={[styles.actionIcon, bookmarked && styles.actionActive]}>
+              {bookmarked ? '★' : '☆'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleShare}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.actionIcon}>⬆</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {state.phase === 'loading' && (
@@ -117,7 +170,7 @@ export default function ArticleScreen() {
       {state.phase === 'error' && (
         <View style={styles.center}>
           <Text style={styles.errorText}>{state.message}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={load}>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => load()}>
             <Text style={styles.retryLabel}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -131,7 +184,7 @@ export default function ArticleScreen() {
             </View>
           )}
           <WebView
-            source={{ html: state.html, baseUrl: 'https://plato.stanford.edu' }}
+            source={{ html: state.html, baseUrl: SEP_BASE }}
             style={styles.web}
             originWhitelist={['*']}
             onShouldStartLoadWithRequest={handleNav}
@@ -176,6 +229,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 80,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 8,
+    gap: 14,
+  },
+  actionIcon: { color: '#555', fontSize: 18 },
+  actionActive: { color: '#7ba4ff' },
+  actionDisabled: { opacity: 0.3 },
   webWrap: { flex: 1 },
   web: { flex: 1, backgroundColor: '#121212' },
   webOverlay: {

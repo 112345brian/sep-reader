@@ -18,7 +18,7 @@ export function buildArticleHtml(article: ArticleData): string {
 <style>
 ${SEP_CSS}
 /* App-specific overrides */
-body { margin: 0; padding: 0; }
+body { margin: 0; padding: 0; font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif; }
 #sep-floating-search form { action: none; }
 .sep-anchor-link { display: none !important; }
 </style>

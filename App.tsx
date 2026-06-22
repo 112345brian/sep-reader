@@ -10,12 +10,14 @@ import type { Prefs } from './src/services/db';
 import HomeScreen from './src/screens/HomeScreen';
 import ArticleScreen from './src/screens/ArticleScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 
 export type RootStackParamList = {
   Home: undefined;
   Article: { slug: string; title: string; fromSlug?: string };
   History: undefined;
+  Settings: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -38,7 +40,7 @@ const THEME = {
   },
 };
 
-type AppPhase = 'booting' | 'onboarding' | 'indexing' | 'ready';
+type AppPhase = 'booting' | 'onboarding' | 'indexing' | 'index_error' | 'ready';
 
 export default function App() {
   const [phase, setPhase] = useState<AppPhase>('booting');
@@ -63,9 +65,16 @@ export default function App() {
 
     if (count === 0) {
       setPhase('indexing');
-      await refreshIndexIfStale();
+      try {
+        await refreshIndexIfStale();
+        const newCount = await getEntryCount();
+        if (newCount === 0) { setPhase('index_error'); return; }
+      } catch {
+        setPhase('index_error');
+        return;
+      }
     } else {
-      refreshIndexIfStale(); // background
+      refreshIndexIfStale(); // background, failures are silent
     }
 
     setPhase('ready');
@@ -121,6 +130,15 @@ export default function App() {
     );
   }
 
+  if (phase === 'index_error') {
+    return (
+      <View style={styles.boot}>
+        <Text style={styles.bootLogo}>SEP</Text>
+        <Text style={styles.bootError}>Could not reach plato.stanford.edu.{'\n'}Check your connection and relaunch.</Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <NavigationContainer theme={THEME} ref={navRef}>
@@ -128,6 +146,7 @@ export default function App() {
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Article" component={ArticleScreen} />
           <Stack.Screen name="History" component={HistoryScreen} />
+          <Stack.Screen name="Settings" component={SettingsScreen} />
         </Stack.Navigator>
       </NavigationContainer>
       {downloadProgress && (
@@ -159,6 +178,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   bootLabel: { color: '#444', fontSize: 13, marginTop: 12 },
+  bootError: { color: '#666', fontSize: 14, marginTop: 24, textAlign: 'center', lineHeight: 22, paddingHorizontal: 40 },
   downloadBar: {
     position: 'absolute',
     top: 0, left: 0, right: 0,
