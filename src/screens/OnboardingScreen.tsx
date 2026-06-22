@@ -67,7 +67,7 @@ export default function OnboardingScreen({ onDone }: Props) {
 function WelcomeStep() {
   return (
     <View style={styles.stepWrap}>
-      <Text style={styles.logo}>SEP</Text>
+      <Text style={styles.logo}>Nous</Text>
       <Text style={styles.title}>Stanford Encyclopedia{'\n'}of Philosophy</Text>
       <Text style={styles.sub}>
         The world's most authoritative philosophy reference, always in your pocket.
