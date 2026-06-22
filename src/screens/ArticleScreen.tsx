@@ -12,6 +12,7 @@ import type { RouteProp } from '@react-navigation/native';
 import {
   getEntry, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
+  getMeta,
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
@@ -97,6 +98,12 @@ export default function ArticleScreen() {
     setOrphanDismissed(false);
 
     await recordRead(slug, entry.title, fromSlug);
+    const [customCss, fontSizeStr] = await Promise.all([
+      getMeta('custom_css'),
+      getMeta('font_size'),
+    ]);
+    const fontSize = fontSizeStr ? parseInt(fontSizeStr, 10) : undefined;
+
     setState({
       phase: 'ready',
       entry,
@@ -106,6 +113,8 @@ export default function ArticleScreen() {
         tocHtml: entry.toc_html ?? '',
         contentHtml: entry.content_html,
         preambleHtml: entry.preamble_html ?? '',
+        customCss: customCss ?? undefined,
+        fontSize,
       }),
     });
   }

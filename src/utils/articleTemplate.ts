@@ -1,4 +1,5 @@
-import { SEP_CSS, SEP_JS } from './injectedAssets';
+import { READER_CSS } from './readerCss';
+import { SEP_JS } from './injectedAssets';
 import { ANNOTATION_JS } from './annotationJs';
 
 export interface ArticleData {
@@ -7,30 +8,28 @@ export interface ArticleData {
   tocHtml: string;
   contentHtml: string;
   preambleHtml: string;
+  customCss?: string;
+  fontSize?: number; // px, overrides --font-size variable
 }
 
 export function buildArticleHtml(article: ArticleData): string {
+  const fontOverride = article.fontSize
+    ? `:root { --font-size: ${article.fontSize}px; }`
+    : '';
+  const customBlock = article.customCss?.trim()
+    ? `<style id="user-css">${article.customCss}</style>`
+    : '';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(article.title)}</title>
-<style>
-${SEP_CSS}
-/* App-specific overrides */
-body { margin: 0; padding: 0; font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif; }
-#sep-floating-search form { action: none; }
-.sep-anchor-link { display: none !important; }
-</style>
+<style>${READER_CSS}${fontOverride}</style>
+${customBlock}
 </head>
 <body>
-<div id="header-wrapper">
-  <div id="header">
-    <div id="branding"><div id="site-title"><span class="pagetitle"></span></div></div>
-    <div id="search"><form><input type="search" name="query" placeholder="Search SEP…"></form></div>
-  </div>
-</div>
 <div id="container">
   <div id="content">
     ${article.tocHtml ? `<div id="toc">${article.tocHtml}</div>` : ''}
@@ -43,10 +42,6 @@ body { margin: 0; padding: 0; font-family: 'Source Serif 4', Georgia, 'Times New
     </div>
   </div>
 </div>
-<script>
-// Intercept SEP search form submission — no-op in local context
-document.querySelector('#search form')?.addEventListener('submit', e => e.preventDefault());
-</script>
 <script>${SEP_JS}</script>
 <script>${ANNOTATION_JS}</script>
 </body>

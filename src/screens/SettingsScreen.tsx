@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
-  getPrefs, savePrefs, getEntryCount, getMeta, getAllUncachedSlugs,
+  getPrefs, savePrefs, getEntryCount, getMeta, setMeta, getAllUncachedSlugs,
   clearArticleCache, getZoteroPrefs, saveZoteroPrefs, getSyncFolder, setSyncFolder,
 } from '../services/db';
 import type { Prefs } from '../services/db';
@@ -27,6 +27,9 @@ export default function SettingsScreen() {
   const [zoteroId, setZoteroId] = useState('');
   const [syncFolder, setSyncFolderState] = useState('');
   const [zoteroSaved, setZoteroSaved] = useState(false);
+  const [customCss, setCustomCss] = useState('');
+  const [cssSaved, setCssSaved] = useState(false);
+  const [fontSize, setFontSize] = useState(17);
 
   useFocusEffect(useCallback(() => {
     getPrefs().then(setPrefs);
@@ -35,6 +38,8 @@ export default function SettingsScreen() {
     );
     getZoteroPrefs().then(p => { setZoteroKey(p.apiKey); setZoteroId(p.userId); });
     getSyncFolder().then(setSyncFolderState);
+    getMeta('custom_css').then(v => setCustomCss(v ?? ''));
+    getMeta('font_size').then(v => setFontSize(v ? parseInt(v, 10) : 17));
     loadCounts();
   }, []));
 
@@ -49,6 +54,23 @@ export default function SettingsScreen() {
     const next = { ...prefs, [key]: value };
     setPrefs(next);
     await savePrefs(next);
+  }
+
+  async function saveCustomCss() {
+    await setMeta('custom_css', customCss.trim());
+    setCssSaved(true);
+    setTimeout(() => setCssSaved(false), 2000);
+  }
+
+  async function resetCustomCss() {
+    await setMeta('custom_css', '');
+    setCustomCss('');
+    setCssSaved(false);
+  }
+
+  async function updateFontSize(px: number) {
+    setFontSize(px);
+    await setMeta('font_size', String(px));
   }
 
   async function saveZotero() {
@@ -127,6 +149,49 @@ export default function SettingsScreen() {
         <Section title="On Launch">
           <OptionRow label="Show search" selected={prefs.homeMode === 'search'} onPress={() => updatePref('homeMode', 'search')} />
           <OptionRow label="Continue reading" selected={prefs.homeMode === 'continue'} onPress={() => updatePref('homeMode', 'continue')} last />
+        </Section>
+
+        {/* Reading */}
+        <Section title="Reading">
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Font size</Text>
+            <View style={styles.fontSizePicker}>
+              {([15, 17, 19, 22] as const).map(px => (
+                <TouchableOpacity
+                  key={px}
+                  style={[styles.fontSizeOption, fontSize === px && styles.fontSizeSelected]}
+                  onPress={() => updateFontSize(px)}
+                >
+                  <Text style={[styles.fontSizeLabel, fontSize === px && styles.fontSizeLabelSelected]}>
+                    {px === 15 ? 'S' : px === 17 ? 'M' : px === 19 ? 'L' : 'XL'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+          <View style={[styles.inputRow, { flexDirection: 'column', alignItems: 'flex-start', paddingVertical: 12 }]}>
+            <Text style={[styles.inputLabel, { width: 'auto', marginBottom: 8 }]}>Custom CSS</Text>
+            <TextInput
+              style={styles.cssInput}
+              value={customCss}
+              onChangeText={setCustomCss}
+              placeholder={'/* override any reading styles */\nbody { font-family: "Palatino", serif; }\n#aueditable { max-width: 600px; }'}
+              placeholderTextColor="#333"
+              multiline
+              autoCorrect={false}
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </View>
+          <View style={[styles.syncBtns, styles.rowLast]}>
+            <TouchableOpacity style={styles.saveBtn} onPress={saveCustomCss}>
+              <Text style={styles.saveBtnText}>{cssSaved ? '✓ Applied' : 'Apply CSS'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.saveBtn, styles.resetBtn]} onPress={resetCustomCss}>
+              <Text style={styles.resetBtnText}>Reset</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.hint}>CSS applies to every article. Reload an article to see changes.</Text>
         </Section>
 
         {/* Zotero */}
@@ -285,4 +350,23 @@ const styles = StyleSheet.create({
 
   hint: { color: '#444', fontSize: 12, lineHeight: 17, paddingHorizontal: 16, paddingBottom: 14 },
   version: { color: '#333', fontSize: 12, textAlign: 'center', marginTop: 40 },
+
+  fontSizePicker: { flexDirection: 'row', gap: 6 },
+  fontSizeOption: {
+    width: 36, height: 30, borderRadius: 7, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#1a1a1a', borderWidth: StyleSheet.hairlineWidth, borderColor: '#333',
+  },
+  fontSizeSelected: { backgroundColor: '#1e2a4a', borderColor: '#7ba4ff' },
+  fontSizeLabel: { color: '#555', fontSize: 13, fontWeight: '600' },
+  fontSizeLabelSelected: { color: '#7ba4ff' },
+
+  cssInput: {
+    width: '100%', minHeight: 120, backgroundColor: '#0e0e0e', borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: '#2a2a2a',
+    color: '#c0c0c0', fontSize: 12, padding: 10,
+    fontFamily: Platform.OS === 'ios' || Platform.OS === 'macos' ? 'Menlo' : 'monospace',
+    lineHeight: 18, textAlignVertical: 'top',
+  },
+  resetBtn: { backgroundColor: '#1a1a1a', borderWidth: StyleSheet.hairlineWidth, borderColor: '#2a2a2a' },
+  resetBtnText: { color: '#555', fontSize: 14, fontWeight: '600' },
 });
