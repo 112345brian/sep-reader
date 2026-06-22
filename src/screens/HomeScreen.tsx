@@ -62,6 +62,9 @@ export default function HomeScreen() {
         <View style={styles.headerRow}>
           <Text style={styles.wordmark}>SEP</Text>
           <View style={styles.headerActions}>
+            <TouchableOpacity onPress={() => nav.navigate('ReadingList')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.headerAction}>Saved</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => nav.navigate('History')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Text style={styles.headerAction}>Journey</Text>
             </TouchableOpacity>

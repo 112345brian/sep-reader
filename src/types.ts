@@ -2,6 +2,7 @@ export interface EntryRow {
   slug: string;
   title: string;
   author: string | null;
+  pub_date: string | null;
   toc_html: string | null;
   preamble_html: string | null;
   content_html: string | null;

@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, indexLinks } from './db';
 
 const BASE = 'https://plato.stanford.edu';
 const INDEX_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -61,11 +61,14 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
     if (!contentHtml) return false;
 
     await cacheArticle(slug, {
-      author: extractAuthor(html),
+      author: extractMetaContent(html, 'citation_author') ?? extractAuthor(html),
+      pub_date: extractMetaContent(html, 'citation_publication_date'),
       toc_html: tocHtml,
       preamble_html: preambleHtml,
       content_html: contentHtml,
     });
+    // Index outgoing links for graph view
+    indexLinks(slug, contentHtml).catch(() => {});
     return true;
   } catch {
     return false;
@@ -111,6 +114,11 @@ function extractById(html: string, id: string): string | null {
 
   const content = html.slice(m.index + m[0].length, i - tag.length - 3).trim();
   return content || null;
+}
+
+function extractMetaContent(html: string, property: string): string | null {
+  const m = html.match(new RegExp(`<meta property="${property}" content="([^"]+)"`));
+  return m ? decodeEntities(m[1].trim()) : null;
 }
 
 function extractTitle(html: string): string | null {

@@ -18,6 +18,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       slug         TEXT PRIMARY KEY,
       title        TEXT NOT NULL,
       author       TEXT,
+      pub_date     TEXT,
       toc_html     TEXT,
       preamble_html TEXT,
       content_html TEXT,
@@ -42,7 +43,14 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE TABLE IF NOT EXISTS bookmarks (
       slug      TEXT PRIMARY KEY,
       title     TEXT NOT NULL,
-      saved_at  INTEGER NOT NULL
+      saved_at  INTEGER NOT NULL,
+      notes     TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS links (
+      from_slug TEXT NOT NULL,
+      to_slug   TEXT NOT NULL,
+      PRIMARY KEY (from_slug, to_slug)
     );
 
     CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
@@ -52,6 +60,12 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       tokenize='porter ascii'
     );
   `);
+
+  // Column migrations — no-op if columns already exist
+  await Promise.all([
+    db.runAsync('ALTER TABLE entries ADD COLUMN pub_date TEXT').catch(() => {}),
+    db.runAsync('ALTER TABLE bookmarks ADD COLUMN notes TEXT').catch(() => {}),
+  ]);
 }
 
 export async function getEntryCount(): Promise<number> {
@@ -85,17 +99,18 @@ export async function upsertIndexEntries(
 
 export async function cacheArticle(
   slug: string,
-  data: Pick<EntryRow, 'author' | 'toc_html' | 'preamble_html' | 'content_html'>
+  data: Pick<EntryRow, 'author' | 'pub_date' | 'toc_html' | 'preamble_html' | 'content_html'>
 ): Promise<void> {
   const db = await getDb();
   const wordCount = countWords(data.content_html ?? '');
   const now = Date.now();
   await db.runAsync(
     `UPDATE entries SET
-       author = ?, toc_html = ?, preamble_html = ?,
+       author = ?, pub_date = ?, toc_html = ?, preamble_html = ?,
        content_html = ?, word_count = ?, cached_at = ?
      WHERE slug = ?`,
-    [data.author ?? null, data.toc_html ?? null, data.preamble_html ?? null,
+    [data.author ?? null, data.pub_date ?? null,
+     data.toc_html ?? null, data.preamble_html ?? null,
      data.content_html ?? null, wordCount, now, slug]
   );
 }
@@ -315,6 +330,126 @@ export async function getAllUncachedSlugs(): Promise<{ slug: string; title: stri
   return db.getAllAsync<{ slug: string; title: string }>(
     'SELECT slug, title FROM entries WHERE cached_at IS NULL ORDER BY title ASC'
   );
+}
+
+// ── Citation ─────────────────────────────────────────────────────────────────
+
+export function formatCitation(entry: Pick<EntryRow, 'slug' | 'title' | 'author' | 'pub_date'>): string {
+  const author = entry.author ?? 'Unknown';
+  const date = entry.pub_date ? formatPubDate(entry.pub_date) : '';
+  const url = `https://plato.stanford.edu/entries/${entry.slug}/`;
+  const dateStr = date ? ` (${date})` : '';
+  return `${author}. "${entry.title}". The Stanford Encyclopedia of Philosophy${dateStr}. Edward N. Zalta and Uri Nodelman (eds.). <${url}>`;
+}
+
+function formatPubDate(raw: string): string {
+  const [year, month] = raw.split('/');
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const m = parseInt(month ?? '1') - 1;
+  return `${months[m] ?? ''} ${year ?? ''}`.trim();
+}
+
+// ── Article links (graph view) ────────────────────────────────────────────────
+
+export async function indexLinks(fromSlug: string, contentHtml: string): Promise<void> {
+  const db = await getDb();
+  const re = /href="\/entries\/([a-z0-9-]+)\//g;
+  const targets = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(contentHtml)) !== null) {
+    if (m[1] !== fromSlug) targets.add(m[1]);
+  }
+  if (targets.size === 0) return;
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM links WHERE from_slug = ?', [fromSlug]);
+    for (const to of targets) {
+      await db.runAsync(
+        'INSERT OR IGNORE INTO links (from_slug, to_slug) VALUES (?, ?)',
+        [fromSlug, to]
+      );
+    }
+  });
+}
+
+export async function getLinksFrom(slug: string): Promise<EntrySummary[]> {
+  const db = await getDb();
+  return db.getAllAsync<EntrySummary>(
+    `SELECT e.slug, e.title, e.author, e.cached_at
+     FROM links l
+     JOIN entries e ON e.slug = l.to_slug
+     WHERE l.from_slug = ?
+     ORDER BY e.title ASC`,
+    [slug]
+  );
+}
+
+export async function getLinksTo(slug: string): Promise<EntrySummary[]> {
+  const db = await getDb();
+  return db.getAllAsync<EntrySummary>(
+    `SELECT e.slug, e.title, e.author, e.cached_at
+     FROM links l
+     JOIN entries e ON e.slug = l.from_slug
+     WHERE l.to_slug = ?
+     ORDER BY e.title ASC`,
+    [slug]
+  );
+}
+
+// ── Reading list (bookmarks + notes) ─────────────────────────────────────────
+
+export async function updateBookmarkNotes(slug: string, notes: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE bookmarks SET notes = ? WHERE slug = ?', [notes, slug]);
+}
+
+export interface BookmarkRow {
+  slug: string;
+  title: string;
+  saved_at: number;
+  notes: string | null;
+  author: string | null;
+  pub_date: string | null;
+  cached_at: number | null;
+}
+
+export async function getBookmarksFull(): Promise<BookmarkRow[]> {
+  const db = await getDb();
+  return db.getAllAsync<BookmarkRow>(
+    `SELECT b.slug, b.title, b.saved_at, b.notes,
+            e.author, e.pub_date, e.cached_at
+     FROM bookmarks b
+     LEFT JOIN entries e USING (slug)
+     ORDER BY b.saved_at DESC`
+  );
+}
+
+// ── Zotero ───────────────────────────────────────────────────────────────────
+
+export async function getZoteroPrefs(): Promise<{ apiKey: string; userId: string }> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ key: string; value: string }>(
+    "SELECT key, value FROM meta WHERE key IN ('zotero_api_key', 'zotero_user_id')"
+  );
+  const m = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  return { apiKey: m['zotero_api_key'] ?? '', userId: m['zotero_user_id'] ?? '' };
+}
+
+export async function saveZoteroPrefs(apiKey: string, userId: string): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_api_key', ?)", [apiKey]);
+    await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_user_id', ?)", [userId]);
+  });
+}
+
+// ── Sync folder ──────────────────────────────────────────────────────────────
+
+export async function getSyncFolder(): Promise<string> {
+  return (await getMeta('sync_folder')) ?? '';
+}
+
+export async function setSyncFolder(path: string): Promise<void> {
+  await setMeta('sync_folder', path);
 }
 
 function countWords(html: string): number {

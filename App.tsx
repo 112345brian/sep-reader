@@ -5,18 +5,21 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services/db';
+import { syncOnLaunch } from './src/services/dataSync';
 import { refreshIndexIfStale, downloadAll } from './src/services/catalog';
 import type { Prefs } from './src/services/db';
 import HomeScreen from './src/screens/HomeScreen';
 import ArticleScreen from './src/screens/ArticleScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import ReadingListScreen from './src/screens/ReadingListScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 
 export type RootStackParamList = {
   Home: undefined;
   Article: { slug: string; title: string; fromSlug?: string };
   History: undefined;
+  ReadingList: undefined;
   Settings: undefined;
 };
 
@@ -61,6 +64,7 @@ export default function App() {
   }
 
   async function initialize(prefs: Prefs) {
+    syncOnLaunch(); // pull from sync folder if newer, non-blocking
     const count = await getEntryCount();
 
     if (count === 0) {
@@ -146,6 +150,7 @@ export default function App() {
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Article" component={ArticleScreen} />
           <Stack.Screen name="History" component={HistoryScreen} />
+          <Stack.Screen name="ReadingList" component={ReadingListScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
         </Stack.Navigator>
       </NavigationContainer>
