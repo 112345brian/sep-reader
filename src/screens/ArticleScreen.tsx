@@ -17,7 +17,9 @@ import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import BookmarkIcon from '../components/BookmarkIcon';
 import AnnotationModal from '../components/AnnotationModal';
+import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
 import type { EntryRow, Annotation } from '../types';
+import { contentHash } from '../services/db';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Article'>;
@@ -47,6 +49,8 @@ export default function ArticleScreen() {
   const [webReady, setWebReady] = useState(false);
   const [bookmarked, setBookmarked] = useState(false);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [orphaned, setOrphaned] = useState<Annotation[]>([]);
+  const [orphanDismissed, setOrphanDismissed] = useState(false);
 
   // Annotation modal state
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null);
@@ -85,7 +89,12 @@ export default function ArticleScreen() {
     }
 
     const anns = await getAnnotationsForSlug(slug);
-    setAnnotations(anns);
+    const currentHash = contentHash(entry.content_html ?? '');
+    const valid = anns.filter(a => !a.content_hash || a.content_hash === currentHash || (entry!.content_html ?? '').includes(a.selected_text));
+    const stale = anns.filter(a => a.content_hash && a.content_hash !== currentHash && !(entry!.content_html ?? '').includes(a.selected_text));
+    setAnnotations(valid);
+    setOrphaned(stale);
+    setOrphanDismissed(false);
 
     await recordRead(slug, entry.title, fromSlug);
     setState({
@@ -136,7 +145,8 @@ export default function ArticleScreen() {
   async function handleSaveAnnotation(
     text: string, context: string | null, color: string, note: string | null
   ) {
-    const ann = await saveAnnotation(slug, text, context, color, note);
+    const currentHash = state.phase === 'ready' ? contentHash(state.entry.content_html ?? '') : null;
+    const ann = await saveAnnotation(slug, text, context, color, note, currentHash);
     const updated = [...annotations, ann];
     setAnnotations(updated);
     // Apply only the new annotation to avoid re-running all
@@ -271,6 +281,25 @@ export default function ArticleScreen() {
           </TouchableOpacity>
         </View>
       )}
+      {state.phase === 'ready' && orphaned.length > 0 && !orphanDismissed && (
+        <OrphanedAnnotationsBanner
+          annotations={orphaned}
+          currentContent={state.entry.content_html ?? ''}
+          currentHash={contentHash(state.entry.content_html ?? '')}
+          onResolved={(ids) => {
+            // Move resolved IDs from orphaned; re-anchored ones go back into annotations
+            setOrphaned(prev => prev.filter(a => !ids.includes(a.id)));
+            // Re-fetch to get updated selected_text for re-anchored ones
+            getAnnotationsForSlug(slug).then(all => {
+              const currentHash = contentHash(state.entry.content_html ?? '');
+              setAnnotations(all.filter(a => (state.entry.content_html ?? '').includes(a.selected_text)));
+              injectAnnotations(all.filter(a => (state.entry.content_html ?? '').includes(a.selected_text)));
+            });
+          }}
+          onDismiss={() => setOrphanDismissed(true)}
+        />
+      )}
+
       {state.phase === 'ready' && (
         <View style={styles.webWrap}>
           {!webReady && (

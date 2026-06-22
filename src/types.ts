@@ -3,6 +3,7 @@ export interface EntryRow {
   title: string;
   author: string | null;
   pub_date: string | null;
+  content_hash: string | null;
   toc_html: string | null;
   preamble_html: string | null;
   content_html: string | null;
@@ -45,6 +46,7 @@ export interface Annotation {
   context: string | null;
   note: string | null;
   color: string;
+  content_hash: string | null;
   created_at: number;
   updated_at: number;
 }

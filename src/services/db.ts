@@ -19,6 +19,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       title        TEXT NOT NULL,
       author       TEXT,
       pub_date     TEXT,
+      content_hash TEXT,
       toc_html     TEXT,
       preamble_html TEXT,
       content_html TEXT,
@@ -60,6 +61,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       context       TEXT,
       note          TEXT,
       color         TEXT NOT NULL DEFAULT '#FFE566',
+      content_hash  TEXT,
       created_at    INTEGER NOT NULL,
       updated_at    INTEGER NOT NULL
     );
@@ -75,7 +77,9 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   // Column migrations — no-op if columns already exist
   await Promise.all([
     db.runAsync('ALTER TABLE entries ADD COLUMN pub_date TEXT').catch(() => {}),
+    db.runAsync('ALTER TABLE entries ADD COLUMN content_hash TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE bookmarks ADD COLUMN notes TEXT').catch(() => {}),
+    db.runAsync('ALTER TABLE annotations ADD COLUMN content_hash TEXT').catch(() => {}),
   ]);
 }
 
@@ -114,13 +118,15 @@ export async function cacheArticle(
 ): Promise<void> {
   const db = await getDb();
   const wordCount = countWords(data.content_html ?? '');
+  const hash = contentHash(data.content_html ?? '');
   const now = Date.now();
   await db.runAsync(
     `UPDATE entries SET
-       author = ?, pub_date = ?, toc_html = ?, preamble_html = ?,
+       author = ?, pub_date = ?, content_hash = ?,
+       toc_html = ?, preamble_html = ?,
        content_html = ?, word_count = ?, cached_at = ?
      WHERE slug = ?`,
-    [data.author ?? null, data.pub_date ?? null,
+    [data.author ?? null, data.pub_date ?? null, hash,
      data.toc_html ?? null, data.preamble_html ?? null,
      data.content_html ?? null, wordCount, now, slug]
   );
@@ -460,19 +466,21 @@ export async function saveAnnotation(
   selectedText: string,
   context: string | null,
   color: string,
-  note: string | null = null
+  note: string | null = null,
+  currentHash: string | null = null
 ): Promise<Annotation> {
   const db = await getDb();
   const now = Date.now();
   const result = await db.runAsync(
-    `INSERT INTO annotations (slug, selected_text, context, note, color, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [slug, selectedText, context ?? null, note ?? null, color, now, now]
+    `INSERT INTO annotations (slug, selected_text, context, note, color, content_hash, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [slug, selectedText, context ?? null, note ?? null, color, currentHash ?? null, now, now]
   );
   return {
     id: result.lastInsertRowId,
     slug, selected_text: selectedText, context: context ?? null,
-    note: note ?? null, color, created_at: now, updated_at: now,
+    note: note ?? null, color, content_hash: currentHash ?? null,
+    created_at: now, updated_at: now,
   };
 }
 
@@ -589,6 +597,35 @@ export async function setSyncFolder(path: string): Promise<void> {
   await setMeta('sync_folder', path);
 }
 
+export async function updateAnnotationAnchor(
+  id: number,
+  newText: string,
+  newHash: string
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'UPDATE annotations SET selected_text = ?, content_hash = ?, updated_at = ? WHERE id = ?',
+    [newText, newHash, Date.now(), id]
+  );
+}
+
+export async function deleteAnnotations(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  await db.runAsync(`DELETE FROM annotations WHERE id IN (${placeholders})`, ids);
+}
+
 function countWords(html: string): number {
   return html.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).filter(Boolean).length;
+}
+
+// Fast djb2-style hash — enough to detect article version changes
+export function contentHash(s: string): string {
+  let h = 5381;
+  const len = Math.min(s.length, 50000);
+  for (let i = 0; i < len; i++) {
+    h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(16);
 }
