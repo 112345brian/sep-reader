@@ -172,10 +172,12 @@ export const ANNOTATION_JS = `
     }
   }
 
-  // ── Native app: suppress companion JS elements that duplicate native UI ──
-  // The reader bar (fixed top bar) is always-visible on mobile per the companion
-  // JS, but Nous already provides a native header. Override after SEP_JS runs so
-  // our !important beats the companion JS's !important (later source order wins).
+  // ── Native app: remove companion JS elements that duplicate native UI ────
+  // The companion JS reader bar is always-visible on mobile but the Nous native
+  // header already provides title + navigation. Remove from DOM entirely so there
+  // is no CSS specificity battle. CSS !important is also added as a fallback.
+  var _rb = document.getElementById('sep-reader-bar');
+  if (_rb && _rb.parentNode) _rb.parentNode.removeChild(_rb);
   var _s = document.createElement('style');
   _s.textContent =
     '#sep-reader-bar{display:none!important}' +
