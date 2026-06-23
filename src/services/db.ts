@@ -123,11 +123,8 @@ export async function upsertIndexEntries(
          ON CONFLICT(slug) DO UPDATE SET title = excluded.title`,
         [e.slug, e.title]
       );
-      await db.runAsync(
-        `INSERT INTO entries_fts (slug, title) VALUES (?, ?)
-         ON CONFLICT DO UPDATE SET title = excluded.title`,
-        [e.slug, e.title]
-      );
+      await db.runAsync(`DELETE FROM entries_fts WHERE slug = ?`, [e.slug]);
+      await db.runAsync(`INSERT INTO entries_fts (slug, title) VALUES (?, ?)`, [e.slug, e.title]);
     }
   });
 }
