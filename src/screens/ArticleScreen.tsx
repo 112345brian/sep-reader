@@ -305,11 +305,6 @@ export default function ArticleScreen() {
   };
 
   const displayTitle = state.phase === 'ready' ? state.entry.title : title;
-  const entry = state.phase === 'ready' ? state.entry : null;
-  const annCount = annotations.length;
-
-  const readMin = entry?.word_count ? Math.ceil(entry.word_count / 200) : null;
-  const year = entry?.pub_date?.slice(0, 4) ?? null;
 
   const openGraph = () =>
     nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle });
@@ -346,7 +341,8 @@ export default function ArticleScreen() {
 
   return (
     <View style={styles.root}>
-      {/* ── App bar ── */}
+      {/* ── App bar (swipe down → graph) ── */}
+      <GestureDetector gesture={swipeGraph}>
       <View style={[styles.appBar, { paddingTop: insets.top }]}>
         <IBtn onPress={() => nav.goBack()}>
           <IconBack />
@@ -359,6 +355,7 @@ export default function ArticleScreen() {
           <IconDots />
         </IBtn>
       </View>
+      </GestureDetector>
 
       {/* ── Overflow menu ── */}
       {showOverflow && (
@@ -403,40 +400,6 @@ export default function ArticleScreen() {
 
       {state.phase === 'ready' && (
         <>
-          {/* ── Native article header (swipe down → graph) ── */}
-          <GestureDetector gesture={swipeGraph}>
-          <View style={styles.articleHeader}>
-            <Text style={styles.articleCategory}>STANFORD ENCYCLOPEDIA</Text>
-            <Text style={styles.articleTitle}>{displayTitle}</Text>
-            <View style={styles.articleMeta}>
-              {entry?.author ? (
-                <Text style={styles.articleMetaText}>{entry.author}</Text>
-              ) : null}
-              {entry?.author && (year || readMin) ? (
-                <Text style={styles.articleMetaDot}>·</Text>
-              ) : null}
-              {year ? (
-                <Text style={styles.articleMetaText}>{year}</Text>
-              ) : null}
-              {year && readMin ? (
-                <Text style={styles.articleMetaDot}>·</Text>
-              ) : null}
-              {readMin ? (
-                <Text style={styles.articleMetaText}>{readMin} min</Text>
-              ) : null}
-              {annCount > 0 && (
-                <TouchableOpacity
-                  style={styles.annChip}
-                  onPress={() => nav.navigate('Annotations')}
-                >
-                  <IconMessage />
-                  <Text style={styles.annChipText}>{annCount} notes</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-          </GestureDetector>
-
           {/* ── Orphan banner ── */}
           {orphaned.length > 0 && !orphanDismissed && (
             <OrphanedAnnotationsBanner
@@ -459,7 +422,6 @@ export default function ArticleScreen() {
           {/* ── WebView (swipe right → home) ── */}
           <GestureDetector gesture={swipeHome}>
           <View style={styles.webWrap}>
-            <View style={styles.edgeAccent} pointerEvents="none" />
             {!webReady && (
               <View style={styles.webOverlay}>
                 <ActivityIndicator color="#5b8ef5" />
@@ -481,9 +443,9 @@ export default function ArticleScreen() {
               textZoom={100}
               androidLayerType="hardware"
             />
-            {/* Swipe-up / tap TOC handle — floating inside webWrap (mockup: absolute bottom:0) */}
+            {/* Swipe-up / tap TOC handle — positioned above system nav bar */}
             <GestureDetector gesture={tocGesture}>
-              <View style={styles.tocHandle}>
+              <View style={[styles.tocHandle, { bottom: insets.bottom }]}>
                 <View style={styles.tocHandlePill} />
               </View>
             </GestureDetector>

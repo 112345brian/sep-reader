@@ -333,9 +333,8 @@ export const READER_CSS = `
   /* Small top buffer so anchor targets aren't flush against the WebView edge */
   [id] { scroll-margin-top: 1rem; }
 
-  /* Title and preamble are rendered natively above the WebView — hide all forms */
-  h1, h1.pagetitle, .pagetitle { display: none !important; }
-  #preamble, .preamble { display: none !important; }
+  /* Section heading links should inherit heading color, not accent blue */
+  h2 a, h3 a { color: inherit !important; }
 
   /* ── Mobile (no font-size override — 16px is locked per ART-09) ─────────── */
   @media (max-width: 768px) {

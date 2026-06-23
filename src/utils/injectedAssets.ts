@@ -15,42 +15,6 @@ export const SEP_JS = `
     // =============================================
     const style = document.createElement('style');
     style.textContent = \`
-        /* Reading progress bar */
-        #sep-progress {
-            position: fixed; top: 0; left: 0; height: 2px; z-index: 9999;
-            background: #7ba4ff; width: 0%; transition: width 0.1s linear;
-            pointer-events: none;
-        }
-
-        /* Section progress bar */
-        #sep-section-progress {
-            position: fixed; top: 0; left: 0; height: 2px; z-index: 9998;
-            background: #242424; width: 0%;
-            transition: width 0.1s linear; pointer-events: none;
-        }
-
-        /* Section progress tick — sits above the blue bar */
-        #sep-section-tick {
-            position: fixed; top: 0; left: 0; width: 8px; height: 2px;
-            z-index: 10000; background: #3a3a3a; pointer-events: none;
-            transition: left 0.1s linear;
-        }
-
-        /* Back to top button */
-        #sep-top-btn {
-            position: fixed; top: 3.75em; left: 20px; z-index: 9998;
-            width: 22px; height: 22px; border-radius: 4px;
-            background: #1a1a1a; border: 1px solid #333; color: #888;
-            font-size: 11px; cursor: pointer; display: none !important;
-            align-items: center; justify-content: center;
-            transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
-            font-family: -apple-system, sans-serif; line-height: 1;
-            padding: 0;
-        }
-        #sep-top-btn:hover { background: #252525; color: #7ba4ff; border-color: #7ba4ff; }
-        #sep-top-btn.visible { display: flex !important; }
-        #sep-top-btn.reader-hidden { display: none !important; }
-
         /* Reading time badge */
         #sep-reading-time {
             display: inline-block; font-size: 0.8em; color: #666;
@@ -87,12 +51,12 @@ export const SEP_JS = `
         /* Mobile layout reset + Wikipedia-matched typography */
         @media (max-width: 768px) {
             html {
-                scroll-padding-top: 4.5rem !important;
+                scroll-padding-top: 1rem !important;
             }
             [id],
             a[name],
             :target {
-                scroll-margin-top: 4.5rem !important;
+                scroll-margin-top: 1rem !important;
             }
             /* TOC drawer */
             #toc {
@@ -264,45 +228,10 @@ export const SEP_JS = `
             #sep-top-btn { display: none !important; }
             #sep-reading-time { display: none !important; }
             #sep-toc-hamburger.toc-is-open { opacity: 0 !important; pointer-events: none !important; }
-            #sep-toc-edge-handle {
-                position: fixed;
-                left: 0;
-                top: 42vh;
-                z-index: 1002;
-                width: 2rem;
-                height: 4rem;
-                display: flex;
-                align-items: center;
-                justify-content: flex-start;
-                padding: 0;
-                border: 0;
-                border-radius: 0;
-                background: transparent;
-                cursor: pointer;
-                opacity: 1;
-                transition: opacity 0.18s ease;
-                touch-action: manipulation;
-            }
-            #sep-toc-edge-handle::before {
-                content: "";
-                width: 3px;
-                height: 2.5rem;
-                border-radius: 0 999px 999px 0;
-                background: rgba(123, 164, 255, 0.62);
-                box-shadow: 0 0 0 1px rgba(123, 164, 255, 0.08);
-            }
-            #sep-toc-edge-handle:hover::before,
-            #sep-toc-edge-handle:focus-visible::before {
-                background: rgba(163, 193, 255, 0.85);
-            }
-            #sep-toc-edge-handle:focus-visible {
-                outline: none;
-            }
-            #sep-toc-edge-handle.is-hidden,
-            #sep-toc-edge-handle.is-search-open {
-                opacity: 0;
-                pointer-events: none;
-            }
+            /* Edge handle replaced by native TOC pill — hidden */
+            #sep-toc-edge-handle { display: none !important; }
+            /* In-WebView reader bar replaced by native app bar — hidden */
+            #sep-reader-bar { display: none !important; }
 
             #toc::before { display: none !important; }
         }
@@ -480,33 +409,14 @@ export const SEP_JS = `
 
 
     // =============================================
-    // 1. READING PROGRESS BAR
+    // 1. READING PROGRESS BAR / BACK-TO-TOP — not in the design mockup.
+    // Elements are kept as detached (never appended) so downstream
+    // references stay valid no-ops, but nothing renders.
     // =============================================
     const progressBar = document.createElement('div');
-    progressBar.id = 'sep-progress';
-    document.body.appendChild(progressBar);
-
     const sectionProgressBar = document.createElement('div');
-    sectionProgressBar.id = 'sep-section-progress';
-    document.body.appendChild(sectionProgressBar);
-
     const sectionTick = document.createElement('div');
-    sectionTick.id = 'sep-section-tick';
-    document.body.appendChild(sectionTick);
-
-
-    // =============================================
-    // 2. BACK TO TOP BUTTON
-    // =============================================
     const topBtn = document.createElement('div');
-    topBtn.id = 'sep-top-btn';
-    topBtn.innerHTML = '&#8593;';
-    topBtn.title = 'Back to top';
-    document.body.appendChild(topBtn);
-
-    topBtn.addEventListener('click', () => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
 
 
     // =============================================
@@ -516,6 +426,7 @@ export const SEP_JS = `
     const scrollCallbacks = [];
 
     let ticking = false;
+    let lastReportedProgress = -1;
     window.addEventListener('scroll', () => {
         if (ticking) return;
         ticking = true;
@@ -526,6 +437,14 @@ export const SEP_JS = `
             progressBar.style.width = \`\${progress}%\`;
             topBtn.classList.toggle('visible', scrollTop > 600);
             for (const cb of scrollCallbacks) cb(scrollTop);
+
+            // Report reading progress to the app (throttled to ~2% steps)
+            if (window.ReactNativeWebView && Math.abs(progress - lastReportedProgress) >= 2) {
+                lastReportedProgress = progress;
+                window.ReactNativeWebView.postMessage(
+                    JSON.stringify({ type: 'progress', value: progress / 100 })
+                );
+            }
             ticking = false;
         });
     });

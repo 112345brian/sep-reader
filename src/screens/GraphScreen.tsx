@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { getGraphData, getEntryPreview } from '../services/db';
+import { getArticleLinkGraph, getEntryPreview } from '../services/db';
 import type { GraphNode, GraphEdge } from '../services/db';
 import type { RootStackParamList } from '../../App';
 
@@ -142,7 +142,7 @@ export default function GraphScreen() {
   ).current;
 
   useEffect(() => {
-    getGraphData().then(data => {
+    getArticleLinkGraph(centerSlug ?? '').then(data => {
       const laid = forceLayout(data.nodes, data.edges, width, canvasH, centerSlug);
       setNodes(laid);
       setEdges(data.edges);
@@ -194,9 +194,9 @@ export default function GraphScreen() {
           </View>
         ) : nodes.length === 0 ? (
           <View style={styles.loadingWrap}>
-            <Text style={styles.emptyTitle}>No connections yet</Text>
+            <Text style={styles.emptyTitle}>No links found</Text>
             <Text style={styles.emptyHint}>
-              Read a few articles — the graph builds as you explore.
+              This article has no indexed links yet.{'\n'}Try re-opening it to fetch connections.
             </Text>
           </View>
         ) : (

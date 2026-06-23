@@ -646,6 +646,45 @@ export async function getGraphData(): Promise<GraphData> {
   };
 }
 
+// Local link graph for a single article: center node + outgoing links + backlinks
+export async function getArticleLinkGraph(centerSlug: string): Promise<GraphData> {
+  const db = await getDb();
+
+  const outgoing = await db.getAllAsync<GraphEdge>(
+    `SELECT from_slug, to_slug FROM links WHERE from_slug = ? LIMIT 150`,
+    [centerSlug]
+  );
+  const incoming = await db.getAllAsync<GraphEdge>(
+    `SELECT from_slug, to_slug FROM links WHERE to_slug = ? LIMIT 50`,
+    [centerSlug]
+  );
+
+  const edges = [...outgoing, ...incoming];
+  if (edges.length === 0) return { nodes: [], edges: [] };
+
+  const allSlugs = new Set<string>([centerSlug]);
+  for (const e of edges) { allSlugs.add(e.from_slug); allSlugs.add(e.to_slug); }
+
+  const readRows = await db.getAllAsync<{slug: string}>('SELECT DISTINCT slug FROM reads');
+  const readSet = new Set(readRows.map(r => r.slug));
+
+  const slugList = Array.from(allSlugs);
+  const titleRows = await db.getAllAsync<{slug: string; title: string}>(
+    `SELECT slug, title FROM entries WHERE slug IN (${slugList.map(() => '?').join(',')})`,
+    slugList
+  );
+  const titleMap = new Map(titleRows.map(r => [r.slug, r.title]));
+
+  return {
+    nodes: slugList.map(slug => ({
+      slug,
+      title: titleMap.get(slug) ?? slug,
+      read: readSet.has(slug),
+    })),
+    edges,
+  };
+}
+
 // ── JSON user data export / import ───────────────────────────────────────────
 
 export interface UserDataExport {
