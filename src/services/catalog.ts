@@ -1,4 +1,5 @@
 import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, indexLinks } from './db';
+import seedEntries from '../assets/entry-seed.json';
 
 const BASE = 'https://plato.stanford.edu';
 const INDEX_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -17,8 +18,15 @@ export async function refreshIndexIfStale(): Promise<void> {
 
   if (!isStale) return;
 
-  const entries = await fetchEntryList();
-  console.log('[catalog] fetchEntryList returned', entries.length, 'entries');
+  let entries: { slug: string; title: string }[];
+  try {
+    entries = await fetchEntryList();
+  } catch {
+    // fall back to bundled seed on first launch; if index already exists, skip silently
+    if (count === 0) entries = seedEntries as { slug: string; title: string }[];
+    else return;
+  }
+
   if (entries.length > 0) {
     await upsertIndexEntries(entries);
     await setMeta('index_refreshed_at', String(Date.now()));
@@ -82,9 +90,7 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
 }
 
 async function fetchEntryList(): Promise<{ slug: string; title: string }[]> {
-  console.log('[catalog] fetching', `${BASE}/contents.html`);
   const res = await fetch(`${BASE}/contents.html`, { headers: SEP_HEADERS });
-  console.log('[catalog] response status', res.status);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
 
