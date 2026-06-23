@@ -211,29 +211,26 @@ export default function SettingsScreen() {
               ))}
             </View>
           </View>
-          <View style={[styles.inputRow, { flexDirection: 'column', alignItems: 'flex-start', paddingVertical: 12 }]}>
-            <Text style={[styles.inputLabel, { width: 'auto', marginBottom: 8 }]}>Custom CSS</Text>
+          <View style={styles.cssBlock}>
             <TextInput
               style={styles.cssInput}
               value={customCss}
               onChangeText={setCustomCss}
-              placeholder={'/* override any reading styles */\nbody { font-family: "Palatino", serif; }\n#aueditable { max-width: 600px; }'}
-              placeholderTextColor="#333"
+              placeholder={'/* override any reading styles */\nbody { font-family: "Palatino", serif; }'}
+              placeholderTextColor="#3a3a3a"
               multiline
               autoCorrect={false}
               autoCapitalize="none"
               spellCheck={false}
             />
+            <Text style={styles.cssRef}>
+              {'Variables: --bg  --text  --accent  --serif  --sans  --font-size  --max-width  --side-pad\n' +
+               'Key selectors: body  #article-content  #preamble  #aueditable  #toc  h1  h2  h3  p  a  blockquote\n' +
+               'Hide elements: #related-entries  #bibliography-section  .footnotes'}
+            </Text>
           </View>
-          <View style={[styles.syncBtns, styles.rowLast]}>
-            <TouchableOpacity style={styles.saveBtn} onPress={saveCustomCss}>
-              <Text style={styles.saveBtnText}>{cssSaved ? '✓ Applied' : 'Apply CSS'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.saveBtn, styles.resetBtn]} onPress={resetCustomCss}>
-              <Text style={styles.resetBtnText}>Reset</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.hint}>CSS applies to every article. Reload an article to see changes.</Text>
+          <ActionRow label={cssSaved ? '✓ Applied' : 'Apply CSS'} onPress={saveCustomCss} accent />
+          <ActionRow label="Reset to default" onPress={resetCustomCss} last />
         </Section>
 
         {/* Zotero */}
@@ -245,60 +242,46 @@ export default function SettingsScreen() {
               value={zoteroId}
               onChangeText={setZoteroId}
               placeholder="12345678"
-              placeholderTextColor="#333"
+              placeholderTextColor="#3a3a3a"
               keyboardType="number-pad"
               autoCorrect={false}
             />
           </View>
-          <View style={[styles.inputRow, styles.rowLast]}>
+          <View style={styles.inputRow}>
             <Text style={styles.inputLabel}>API Key</Text>
             <TextInput
               style={styles.input}
               value={zoteroKey}
               onChangeText={setZoteroKey}
               placeholder="your-api-key"
-              placeholderTextColor="#333"
+              placeholderTextColor="#3a3a3a"
               autoCorrect={false}
               autoCapitalize="none"
               secureTextEntry
             />
           </View>
-          <TouchableOpacity style={styles.saveBtn} onPress={saveZotero}>
-            <Text style={styles.saveBtnText}>{zoteroSaved ? '✓ Saved' : 'Save'}</Text>
-          </TouchableOpacity>
-          <Text style={styles.hint}>
-            Get your user ID and API key at zotero.org/settings/keys
-          </Text>
+          <ActionRow label={zoteroSaved ? '✓ Saved' : 'Save'} onPress={saveZotero} accent last />
         </Section>
+        <Text style={styles.hint}>Get your user ID and API key at zotero.org/settings/keys</Text>
 
         {/* Sync Folder */}
         <Section title="Sync Folder">
-          <View style={[styles.inputRow, styles.rowLast]}>
+          <View style={styles.inputRow}>
             <TextInput
               style={[styles.input, styles.pathInput]}
               value={syncFolder}
               onChangeText={setSyncFolderState}
               placeholder={Platform.OS === 'macos' ? '~/Documents/Nous/' : '/sdcard/Nous/'}
-              placeholderTextColor="#333"
+              placeholderTextColor="#3a3a3a"
               autoCorrect={false}
               autoCapitalize="none"
             />
           </View>
-          <TouchableOpacity style={styles.saveBtn} onPress={saveSyncFolder}>
-            <Text style={styles.saveBtnText}>Set Folder</Text>
-          </TouchableOpacity>
-          <View style={styles.syncBtns}>
-            <TouchableOpacity style={styles.syncBtn} onPress={handleExport}>
-              <Text style={styles.syncBtnText}>Export →</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.syncBtn} onPress={handleImport}>
-              <Text style={styles.syncBtnText}>← Import</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.hint}>
-            Point to a folder in iCloud Drive, Dropbox, or any synced location for cross-device sync.
-          </Text>
+          <ActionRow label="Set Folder" onPress={saveSyncFolder} accent />
+          <ActionRow label="Export →" onPress={handleExport} />
+          <ActionRow label="← Import" onPress={handleImport} last />
         </Section>
+        <Text style={styles.hint}>Point to a folder in iCloud Drive, Dropbox, or any synced location.</Text>
 
         {/* Library */}
         <Section title="Library">
@@ -324,12 +307,10 @@ export default function SettingsScreen() {
         <Section title="Auto-sync">
           <OptionRow label="Off" selected={autoSync === 'off'} onPress={() => setAutoSyncPref('off')} />
           <OptionRow label="Every 2 days" selected={autoSync === '2days'} onPress={() => setAutoSyncPref('2days')} />
-          <OptionRow label="Every week" selected={autoSync === '7days'} onPress={() => setAutoSyncPref('7days')} last />
-          <TouchableOpacity style={styles.saveBtn} onPress={handleSyncNow} disabled={syncing}>
-            <Text style={styles.saveBtnText}>{syncing ? 'Syncing…' : 'Check for updates now'}</Text>
-          </TouchableOpacity>
-          <Text style={styles.hint}>Re-fetches cached articles and picks up new entries from SEP.</Text>
+          <OptionRow label="Every week" selected={autoSync === '7days'} onPress={() => setAutoSyncPref('7days')} />
+          <ActionRow label={syncing ? 'Syncing…' : 'Check for updates now'} onPress={handleSyncNow} accent last />
         </Section>
+        <Text style={styles.hint}>Re-fetches cached articles and picks up new entries from SEP.</Text>
 
         {/* Storage */}
         <Section title="Storage">
@@ -366,6 +347,14 @@ function OptionRow({ label, selected, onPress, last }: { label: string; selected
   );
 }
 
+function ActionRow({ label, onPress, accent, last, destructive }: { label: string; onPress: () => void; accent?: boolean; last?: boolean; destructive?: boolean }) {
+  return (
+    <TouchableOpacity style={[styles.row, last && styles.rowLast]} onPress={onPress} activeOpacity={0.6}>
+      <Text style={[styles.actionLabel, accent && styles.actionAccent, destructive && styles.destructiveLabel]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 function Row({ label, value, last }: { label: string; value: string; last?: boolean }) {
   return (
     <View style={[styles.row, last && styles.rowLast]}>
@@ -375,70 +364,93 @@ function Row({ label, value, last }: { label: string; value: string; last?: bool
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#121212' },
-  header: {
-    flexDirection: 'row', alignItems: 'flex-end', paddingBottom: 8, paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#2a2a2a', minHeight: 44,
-  },
-  back: { flexDirection: 'row', alignItems: 'center', minWidth: 80, paddingHorizontal: 8 },
-  backChevron: { color: '#7ba4ff', fontSize: 28, lineHeight: 28, marginRight: 1 },
-  backLabel: { color: '#7ba4ff', fontSize: 16 },
-  headerTitle: { flex: 1, color: '#e8e8e8', fontSize: 15, fontWeight: '600', textAlign: 'center' },
+const S = {
+  bg:       '#111111',
+  surface:  '#1c1c1c',
+  border:   '#252525',
+  text:     '#e0e0e0',
+  textDim:  '#999999',
+  textHint: '#5a5a5a',
+  accent:   '#7ba4ff',
+  red:      '#ff6b6b',
+};
 
-  section: { marginTop: 32, paddingHorizontal: 16 },
-  sectionTitle: { color: '#444', fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 8 },
-  sectionBody: { borderRadius: 10, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: '#2a2a2a', backgroundColor: '#171717' },
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: S.bg },
+  header: {
+    flexDirection: 'row', alignItems: 'flex-end',
+    paddingBottom: 10, paddingHorizontal: 8,
+    minHeight: 50,
+  },
+  back: { flexDirection: 'row', alignItems: 'center', minWidth: 80, paddingHorizontal: 6 },
+  backChevron: { color: S.accent, fontSize: 24, lineHeight: 26, marginRight: 2 },
+  backLabel: { color: S.accent, fontSize: 15 },
+  headerTitle: { flex: 1, color: S.text, fontSize: 15, fontWeight: '600', textAlign: 'center' },
+
+  section: { marginTop: 28, paddingHorizontal: 16 },
+  sectionTitle: {
+    color: S.textHint, fontSize: 11, fontWeight: '700',
+    letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6,
+  },
+  sectionBody: { borderRadius: 12, overflow: 'hidden', backgroundColor: S.surface },
 
   row: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#222',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: S.border,
   },
   rowLast: { borderBottomWidth: 0 },
-  rowLabel: { color: '#d6d6d6', fontSize: 15 },
-  rowValue: { color: '#555', fontSize: 14 },
-  checkmark: { color: '#7ba4ff', fontSize: 16 },
-  destructiveLabel: { color: '#ff6b6b', fontSize: 15 },
+  rowLabel: { color: S.text, fontSize: 15 },
+  rowValue: { color: S.textDim, fontSize: 14 },
+  checkmark: { color: S.accent, fontSize: 15 },
+  actionLabel: { color: S.textDim, fontSize: 15 },
+  actionAccent: { color: S.accent },
+  destructiveLabel: { color: S.red, fontSize: 15 },
 
   inputRow: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#222',
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: S.border,
     gap: 12,
   },
-  inputLabel: { color: '#888', fontSize: 14, width: 56 },
-  input: { flex: 1, color: '#e8e8e8', fontSize: 14, paddingVertical: 4 },
-  pathInput: { fontFamily: Platform.OS === 'ios' || Platform.OS === 'macos' ? 'Menlo' : 'monospace', fontSize: 13 },
+  inputLabel: { color: S.textDim, fontSize: 14, width: 56 },
+  input: { flex: 1, color: S.text, fontSize: 14, paddingVertical: 4 },
+  pathInput: {
+    fontFamily: Platform.OS === 'ios' || Platform.OS === 'macos' ? 'Menlo' : 'monospace',
+    fontSize: 13,
+  },
 
-  saveBtn: { margin: 12, backgroundColor: '#1e2a4a', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
-  saveBtnText: { color: '#7ba4ff', fontSize: 14, fontWeight: '600' },
-
-  syncBtns: { flexDirection: 'row', gap: 8, marginHorizontal: 12, marginBottom: 12 },
-  syncBtn: { flex: 1, backgroundColor: '#1a1a1a', borderRadius: 8, paddingVertical: 10, alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: '#2a2a2a' },
-  syncBtnText: { color: '#888', fontSize: 14 },
-
-  hint: { color: '#444', fontSize: 12, lineHeight: 17, paddingHorizontal: 16, paddingBottom: 14 },
-  version: { color: '#333', fontSize: 12, textAlign: 'center', marginTop: 40 },
-  attribution: { color: '#2a2a2a', fontSize: 11, textAlign: 'center', marginTop: 6 },
-  attributionUrl: { color: '#252525', fontSize: 10, textAlign: 'center', marginTop: 2, marginBottom: 8 },
+  hint: {
+    color: S.textHint, fontSize: 12, lineHeight: 18,
+    paddingHorizontal: 20, paddingTop: 6, paddingBottom: 4,
+  },
+  version: { color: S.textHint, fontSize: 12, textAlign: 'center', marginTop: 40 },
+  attribution: { color: '#333', fontSize: 11, textAlign: 'center', marginTop: 6 },
+  attributionUrl: { color: '#2e2e2e', fontSize: 10, textAlign: 'center', marginTop: 2, marginBottom: 8 },
 
   fontSizePicker: { flexDirection: 'row', gap: 6 },
   fontSizeOption: {
-    width: 36, height: 30, borderRadius: 7, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#1a1a1a', borderWidth: StyleSheet.hairlineWidth, borderColor: '#333',
+    width: 38, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: S.bg, borderWidth: 1, borderColor: S.border,
   },
-  fontSizeSelected: { backgroundColor: '#1e2a4a', borderColor: '#7ba4ff' },
-  fontSizeLabel: { color: '#555', fontSize: 13, fontWeight: '600' },
-  fontSizeLabelSelected: { color: '#7ba4ff' },
+  fontSizeSelected: { backgroundColor: '#162040', borderColor: S.accent },
+  fontSizeLabel: { color: S.textDim, fontSize: 13, fontWeight: '600' },
+  fontSizeLabelSelected: { color: S.accent },
 
+  cssBlock: {
+    paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: S.border,
+  },
   cssInput: {
-    width: '100%', minHeight: 120, backgroundColor: '#0e0e0e', borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: '#2a2a2a',
-    color: '#c0c0c0', fontSize: 12, padding: 10,
+    minHeight: 110, backgroundColor: '#0d0d0d', borderRadius: 8,
+    borderWidth: 1, borderColor: '#252525',
+    color: '#bdbdbd', fontSize: 12, padding: 10,
     fontFamily: Platform.OS === 'ios' || Platform.OS === 'macos' ? 'Menlo' : 'monospace',
     lineHeight: 18, textAlignVertical: 'top',
   },
-  resetBtn: { backgroundColor: '#1a1a1a', borderWidth: StyleSheet.hairlineWidth, borderColor: '#2a2a2a' },
-  resetBtnText: { color: '#555', fontSize: 14, fontWeight: '600' },
+  cssRef: {
+    color: '#404040', fontSize: 11, lineHeight: 16,
+    paddingTop: 8, paddingBottom: 6,
+    fontFamily: Platform.OS === 'ios' || Platform.OS === 'macos' ? 'Menlo' : 'monospace',
+  },
 });

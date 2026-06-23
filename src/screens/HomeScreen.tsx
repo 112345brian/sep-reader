@@ -1,14 +1,14 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, FlatList, TouchableOpacity,
-  StyleSheet, StatusBar, ActivityIndicator,
+  StyleSheet, StatusBar, ActivityIndicator, Alert,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { searchEntries, getRecentSlugs, getBookmarks, getAllAnnotations } from '../services/db';
+import { searchEntries, getRecentSlugs, getBookmarks, getAllAnnotations, toggleBookmark } from '../services/db';
 import type { EntrySummary } from '../types';
 import type { AnnotationWithTitle } from '../services/db';
 import type { RootStackParamList } from '../../App';
@@ -139,6 +139,20 @@ export default function HomeScreen() {
 
   const open = (slug: string, title: string) => nav.navigate('Article', { slug, title });
 
+  const handleIconPress = (item: EntrySummary, isBookmarked: boolean) => {
+    const bmLabel = isBookmarked ? 'Remove Bookmark' : 'Bookmark';
+    Alert.alert(item.title, undefined, [
+      {
+        text: bmLabel,
+        onPress: async () => {
+          await toggleBookmark(item.slug, item.title);
+          loadData();
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   const bookmarkSlugs = new Set(bookmarks.map(b => b.slug));
   const recentHistory = history.filter(h => !bookmarkSlugs.has(h.slug));
 
@@ -198,7 +212,7 @@ export default function HomeScreen() {
         <FlatList
           data={results}
           keyExtractor={i => i.slug}
-          renderItem={({ item }) => <PageRow item={item} onPress={open} />}
+          renderItem={({ item }) => <PageRow item={item} onPress={open} isBookmarked={bookmarkSlugs.has(item.slug)} onIconPress={i => handleIconPress(i, bookmarkSlugs.has(i.slug))} />}
           contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={
@@ -227,17 +241,17 @@ export default function HomeScreen() {
             <FlatList
               data={recentHistory}
               keyExtractor={i => i.slug}
-              renderItem={({ item }) => <PageRow item={item} onPress={open} />}
+              renderItem={({ item }) => <PageRow item={item} onPress={open} isBookmarked={bookmarkSlugs.has(item.slug)} onIconPress={i => handleIconPress(i, bookmarkSlugs.has(i.slug))} />}
               contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
               ListHeaderComponent={
                 <>
                   {bookmarks.length > 0 && (
                     <>
                       <Text style={styles.secLabel}>Bookmarks</Text>
-                      {bookmarks.map(item => <PageRow key={item.slug} item={item} onPress={open} />)}
+                      {bookmarks.map(item => <PageRow key={item.slug} item={item} onPress={open} isBookmarked onIconPress={i => handleIconPress(i, true)} />)}
                     </>
                   )}
-                  {recentHistory.length > 0 && <Text style={styles.secLabel}>Continue reading</Text>}
+                  {recentHistory.length > 0 && bookmarks.length > 0 && <Text style={styles.secLabel}>Recent</Text>}
                   {recentHistory.length === 0 && bookmarks.length === 0 && (
                     <Text style={styles.hint}>Search any topic in philosophy.{'\n'}Articles cache for offline reading.</Text>
                   )}
@@ -291,7 +305,14 @@ export default function HomeScreen() {
 
 // ── Page row ───────────────────────────────────────────────────────────────
 
-function PageRow({ item, onPress }: { item: EntrySummary; onPress: (slug: string, title: string) => void }) {
+function PageRow({
+  item, onPress, isBookmarked = false, onIconPress,
+}: {
+  item: EntrySummary;
+  onPress: (slug: string, title: string) => void;
+  isBookmarked?: boolean;
+  onIconPress?: (item: EntrySummary) => void;
+}) {
   const pct = Math.round((item.read_progress ?? 0) * 100);
   const annCount = item.annotation_count ?? 0;
 
@@ -303,7 +324,14 @@ function PageRow({ item, onPress }: { item: EntrySummary; onPress: (slug: string
 
   return (
     <TouchableOpacity style={styles.pageRow} onPress={() => onPress(item.slug, item.title)} activeOpacity={0.5}>
-      <View style={styles.pageRowIcon}><IconDoc /></View>
+      <TouchableOpacity
+        style={[styles.pageRowIcon, isBookmarked && styles.pageRowIconBookmarked]}
+        onPress={() => onIconPress?.(item)}
+        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        activeOpacity={0.6}
+      >
+        <IconDoc color={isBookmarked ? C.accent : C.textHint} />
+      </TouchableOpacity>
       <View style={styles.pageRowBody}>
         <Text style={styles.pageRowTitle} numberOfLines={2}>{item.title}</Text>
         {meta ? <Text style={styles.pageRowMeta} numberOfLines={1}>{meta}</Text> : null}
@@ -419,6 +447,9 @@ const styles = StyleSheet.create({
     backgroundColor: C.bgSurface,
     alignItems: 'center', justifyContent: 'center',
     flexShrink: 0,
+  },
+  pageRowIconBookmarked: {
+    backgroundColor: C.accentDim,
   },
   pageRowBody: { flex: 1, minWidth: 0 },
   pageRowTitle: { fontSize: 14, fontWeight: '500', color: C.text, lineHeight: 18 },
