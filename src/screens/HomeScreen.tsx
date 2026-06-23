@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, FlatList, TouchableOpacity,
   StyleSheet, StatusBar, ActivityIndicator,
@@ -7,13 +7,14 @@ import Svg, { Path, Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { searchEntries, getRecentSlugs, getBookmarks } from '../services/db';
+import { searchEntries, getRecentSlugs, getBookmarks, getAllAnnotations } from '../services/db';
 import type { EntrySummary } from '../types';
+import type { AnnotationWithTitle } from '../services/db';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-// ── Design tokens (mirrors mockup CSS vars) ────────────────────────────────
+// ── Design tokens ──────────────────────────────────────────────────────────
 const C = {
   bg:           '#111111',
   bgSurface:    '#1c1c1c',
@@ -61,41 +62,38 @@ function IconDots({ size = 21, color = C.textHint }: { size?: number; color?: st
   );
 }
 
-function IconHome({ size = 22, color = C.textHint }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <Path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><Path d="M9 22V12h6v10" />
-    </Svg>
-  );
-}
-
-function IconNotes({ size = 22, color = C.textHint }: { size?: number; color?: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </Svg>
-  );
-}
-
 // ── Component ──────────────────────────────────────────────────────────────
+
+interface ArticleGroup {
+  slug: string;
+  title: string | null;
+  items: AnnotationWithTitle[];
+}
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
 
-  const [query, setQuery]       = useState('');
-  const [results, setResults]   = useState<EntrySummary[]>([]);
-  const [history, setHistory]   = useState<EntrySummary[]>([]);
-  const [bookmarks, setBookmarks] = useState<EntrySummary[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [tab, setTab]           = useState<'home' | 'search'>('home');
-  const searchInputRef          = useRef<TextInput>(null);
-  const debounce                = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [activeTab, setActiveTab]     = useState<'reading' | 'notes'>('reading');
+  const [isSearchActive, setSearchActive] = useState(false);
+  const [query, setQuery]             = useState('');
+  const [results, setResults]         = useState<EntrySummary[]>([]);
+  const [history, setHistory]         = useState<EntrySummary[]>([]);
+  const [bookmarks, setBookmarks]     = useState<EntrySummary[]>([]);
+  const [annotations, setAnnotations] = useState<AnnotationWithTitle[]>([]);
+  const [searching, setSearching]     = useState(false);
+  const searchInputRef                = useRef<TextInput>(null);
+  const debounce                      = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadData = useCallback(async () => {
-    const [h, b] = await Promise.all([getRecentSlugs(12), getBookmarks()]);
+    const [h, b, anns] = await Promise.all([
+      getRecentSlugs(12),
+      getBookmarks(),
+      getAllAnnotations(),
+    ]);
     setHistory(h);
     setBookmarks(b);
+    setAnnotations(anns);
   }, []);
 
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
@@ -103,7 +101,11 @@ export default function HomeScreen() {
   const handleSearch = (text: string) => {
     setQuery(text);
     if (debounce.current) clearTimeout(debounce.current);
-    if (!text.trim()) { setSearching(false); setResults([]); return; }
+    if (!text.trim()) {
+      setSearching(false);
+      setResults([]);
+      return;
+    }
     setSearching(true);
     debounce.current = setTimeout(async () => {
       const r = await searchEntries(text, 60);
@@ -113,21 +115,38 @@ export default function HomeScreen() {
   };
 
   const openSearch = () => {
-    setTab('search');
+    setSearchActive(true);
     setTimeout(() => searchInputRef.current?.focus(), 100);
+  };
+
+  const closeSearch = () => {
+    setSearchActive(false);
+    setQuery('');
+    setResults([]);
+    setSearching(false);
   };
 
   const open = (slug: string, title: string) => nav.navigate('Article', { slug, title });
 
-  const bookmarkSlugs  = new Set(bookmarks.map(b => b.slug));
-  const recentHistory  = history.filter(h => !bookmarkSlugs.has(h.slug));
-  const isSearchActive = tab === 'search';
+  const bookmarkSlugs = new Set(bookmarks.map(b => b.slug));
+  const recentHistory = history.filter(h => !bookmarkSlugs.has(h.slug));
+
+  const grouped = useMemo<ArticleGroup[]>(() => {
+    const map = new Map<string, ArticleGroup>();
+    for (const ann of annotations) {
+      if (!map.has(ann.slug)) {
+        map.set(ann.slug, { slug: ann.slug, title: ann.article_title, items: [] });
+      }
+      map.get(ann.slug)!.items.push(ann);
+    }
+    return Array.from(map.values());
+  }, [annotations]);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
-      {/* ── App bar (no border per mockup) ── */}
+      {/* ── App bar ── */}
       <View style={styles.ab}>
         <Text style={styles.abTitle}>Nous</Text>
         <TouchableOpacity style={styles.ib} onPress={() => nav.navigate('Settings')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -149,12 +168,11 @@ export default function HomeScreen() {
             returnKeyType="search"
             autoCorrect={false}
             autoCapitalize="none"
+            onBlur={() => { if (!query.trim()) setTimeout(closeSearch, 120); }}
           />
-          {query.length > 0 && (
-            <TouchableOpacity onPress={() => handleSearch('')}>
-              <Text style={styles.clearBtn}>✕</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity onPress={closeSearch}>
+            <Text style={styles.clearBtn}>✕</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <TouchableOpacity style={styles.searchPill} onPress={openSearch} activeOpacity={0.7}>
@@ -163,13 +181,13 @@ export default function HomeScreen() {
         </TouchableOpacity>
       )}
 
-      {/* ── Content ── */}
+      {/* ── Search results ── */}
       {isSearchActive ? (
         <FlatList
           data={results}
           keyExtractor={i => i.slug}
           renderItem={({ item }) => <PageRow item={item} onPress={open} />}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={
             query.trim().length === 0 ? null
@@ -179,59 +197,94 @@ export default function HomeScreen() {
           }
         />
       ) : (
-        <FlatList
-          data={recentHistory}
-          keyExtractor={i => i.slug}
-          renderItem={({ item }) => <PageRow item={item} onPress={open} />}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
-          ListHeaderComponent={
-            <>
-              {bookmarks.length > 0 && (
-                <>
-                  <Text style={styles.secLabel}>Bookmarks</Text>
-                  {bookmarks.map(item => <PageRow key={item.slug} item={item} onPress={open} />)}
-                </>
-              )}
-              {recentHistory.length > 0 && <Text style={styles.secLabel}>Continue reading</Text>}
-              {recentHistory.length === 0 && bookmarks.length === 0 && (
-                <Text style={styles.hint}>Search any topic in philosophy.{'\n'}Articles cache for offline reading.</Text>
-              )}
-            </>
-          }
-        />
-      )}
+        <>
+          {/* ── Inline tabs ── */}
+          <View style={styles.tabRow}>
+            <TouchableOpacity style={styles.tabBtn} onPress={() => setActiveTab('reading')} activeOpacity={0.7}>
+              <Text style={[styles.tabLabel, activeTab === 'reading' && styles.tabLabelActive]}>Reading</Text>
+              {activeTab === 'reading' && <View style={styles.tabUnderline} />}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.tabBtn} onPress={() => setActiveTab('notes')} activeOpacity={0.7}>
+              <Text style={[styles.tabLabel, activeTab === 'notes' && styles.tabLabelActive]}>Notes</Text>
+              {activeTab === 'notes' && <View style={styles.tabUnderline} />}
+            </TouchableOpacity>
+          </View>
 
-      {/* ── Bottom nav ── */}
-      <View style={[styles.bn, { paddingBottom: insets.bottom }]}>
-        <TouchableOpacity style={styles.bnItem} onPress={() => { setTab('home'); setQuery(''); setResults([]); }} activeOpacity={0.7}>
-          {tab === 'home' && <View style={styles.bnPill} />}
-          <IconHome color={tab === 'home' ? C.accent : C.textHint} />
-          <Text style={[styles.bnLabel, tab === 'home' && styles.bnLabelActive]}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.bnItem} onPress={openSearch} activeOpacity={0.7}>
-          {tab === 'search' && <View style={styles.bnPill} />}
-          <IconSearch size={22} color={tab === 'search' ? C.accent : C.textHint} />
-          <Text style={[styles.bnLabel, tab === 'search' && styles.bnLabelActive]}>Search</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.bnItem} onPress={() => nav.navigate('Annotations')} activeOpacity={0.7}>
-          <IconNotes color={C.textHint} />
-          <Text style={styles.bnLabel}>Notes</Text>
-        </TouchableOpacity>
-      </View>
+          {/* ── Reading tab ── */}
+          {activeTab === 'reading' && (
+            <FlatList
+              data={recentHistory}
+              keyExtractor={i => i.slug}
+              renderItem={({ item }) => <PageRow item={item} onPress={open} />}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+              ListHeaderComponent={
+                <>
+                  {bookmarks.length > 0 && (
+                    <>
+                      <Text style={styles.secLabel}>Bookmarks</Text>
+                      {bookmarks.map(item => <PageRow key={item.slug} item={item} onPress={open} />)}
+                    </>
+                  )}
+                  {recentHistory.length > 0 && <Text style={styles.secLabel}>Continue reading</Text>}
+                  {recentHistory.length === 0 && bookmarks.length === 0 && (
+                    <Text style={styles.hint}>Search any topic in philosophy.{'\n'}Articles cache for offline reading.</Text>
+                  )}
+                </>
+              }
+            />
+          )}
+
+          {/* ── Notes tab ── */}
+          {activeTab === 'notes' && (
+            <FlatList
+              data={grouped}
+              keyExtractor={g => g.slug}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+              ListEmptyComponent={
+                <Text style={styles.hint}>No notes yet.{'\n'}Highlight text in any article to add one.</Text>
+              }
+              renderItem={({ item: group }) => (
+                <TouchableOpacity
+                  style={styles.noteGroup}
+                  onPress={() => open(group.slug, group.title ?? group.slug)}
+                  activeOpacity={0.6}
+                >
+                  <View style={styles.noteGroupHeader}>
+                    <Text style={styles.noteGroupTitle} numberOfLines={1}>
+                      {group.title ?? group.slug}
+                    </Text>
+                    <Text style={styles.noteGroupCount}>
+                      {group.items.length} note{group.items.length === 1 ? '' : 's'}
+                    </Text>
+                  </View>
+                  {group.items.slice(0, 2).map(ann => (
+                    <View key={ann.id} style={[styles.noteChip, { borderLeftColor: ann.color }]}>
+                      <Text style={styles.noteChipText} numberOfLines={2}>{ann.selected_text}</Text>
+                      {ann.note ? <Text style={styles.noteChipNote} numberOfLines={1}>{ann.note}</Text> : null}
+                    </View>
+                  ))}
+                  {group.items.length > 2 && (
+                    <Text style={styles.noteMore}>+{group.items.length - 2} more</Text>
+                  )}
+                </TouchableOpacity>
+              )}
+            />
+          )}
+        </>
+      )}
     </View>
   );
 }
 
-// ── Page row (mirrors .page-row in mockup) ─────────────────────────────────
+// ── Page row ───────────────────────────────────────────────────────────────
 
 function PageRow({ item, onPress }: { item: EntrySummary; onPress: (slug: string, title: string) => void }) {
   const pct = Math.round((item.read_progress ?? 0) * 100);
   const annCount = item.annotation_count ?? 0;
 
-  // Meta line, mockup style: "67% read · 3 annotations"
   const metaParts: string[] = [];
   if (pct > 0) metaParts.push(`${pct}% read`);
-  if (annCount > 0) metaParts.push(`${annCount} annotation${annCount === 1 ? '' : 's'}`);
+  if (annCount > 0) metaParts.push(`${annCount} note${annCount === 1 ? '' : 's'}`);
   if (metaParts.length === 0 && item.author) metaParts.push(item.author);
   const meta = metaParts.join(' · ');
 
@@ -253,12 +306,11 @@ function PageRow({ item, onPress }: { item: EntrySummary; onPress: (slug: string
   );
 }
 
-// ── Styles (direct translation of mockup CSS) ──────────────────────────────
+// ── Styles ─────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
 
-  // App bar — no border-bottom (mock: border-bottom:none on home ab)
   ab: {
     height: 52,
     flexDirection: 'row',
@@ -280,13 +332,12 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
 
-  // Search pill (mock: .home-search)
   searchPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     marginHorizontal: 14,
-    marginBottom: 12,
+    marginBottom: 4,
     height: 46,
     backgroundColor: C.bgSurface,
     borderRadius: 23,
@@ -298,7 +349,37 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 16, color: C.text, padding: 0 },
   clearBtn: { color: C.textHint, fontSize: 14, paddingHorizontal: 4 },
 
-  // Section label (mock: .sec-label)
+  // Inline tabs
+  tabRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderSubtle,
+    marginBottom: 0,
+  },
+  tabBtn: {
+    marginRight: 24,
+    paddingBottom: 10,
+    position: 'relative',
+  },
+  tabLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: C.textHint,
+  },
+  tabLabelActive: {
+    color: C.text,
+  },
+  tabUnderline: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0, right: 0,
+    height: 2,
+    backgroundColor: C.accent,
+    borderRadius: 1,
+  },
+
   secLabel: {
     paddingHorizontal: 16,
     paddingTop: 14,
@@ -310,7 +391,6 @@ const styles = StyleSheet.create({
     color: C.textHint,
   },
 
-  // Page row (mock: .page-row)
   pageRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -333,47 +413,57 @@ const styles = StyleSheet.create({
   pageRowExcerpt: { fontSize: 12, color: C.textHint, marginTop: 3, lineHeight: 17 },
   pageRowChev: { alignSelf: 'center' },
 
-  // mock: width:100%;height:2px;background:#2a2a2a;border-radius:1px;margin-top:7px
   progressTrack: {
-    width: '100%',
-    height: 2,
+    width: '100%', height: 2,
     backgroundColor: '#2a2a2a',
-    borderRadius: 1,
-    marginTop: 7,
+    borderRadius: 1, marginTop: 7,
     overflow: 'hidden',
   },
-  // mock: height:100%;background:#5b8ef5;border-radius:1px;opacity:.6
   progressFill: {
     height: '100%',
     backgroundColor: C.accent,
-    borderRadius: 1,
-    opacity: 0.6,
+    borderRadius: 1, opacity: 0.6,
+  },
+
+  // Notes tab
+  noteGroup: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderSubtle,
+  },
+  noteGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  noteGroupTitle: {
+    flex: 1,
+    fontSize: 14, fontWeight: '600',
+    color: C.text,
+  },
+  noteGroupCount: {
+    fontSize: 11, color: C.textHint,
+    marginLeft: 8,
+  },
+  noteChip: {
+    borderLeftWidth: 3,
+    paddingLeft: 10,
+    marginBottom: 6,
+  },
+  noteChipText: {
+    fontSize: 13, color: '#9a9a9a',
+    lineHeight: 18,
+  },
+  noteChipNote: {
+    fontSize: 12, color: C.textHint,
+    marginTop: 2, fontStyle: 'italic',
+  },
+  noteMore: {
+    fontSize: 12, color: C.textHint,
+    marginTop: 2,
   },
 
   hint: { color: C.textHint, fontSize: 15, lineHeight: 22, textAlign: 'center', marginTop: 80, paddingHorizontal: 32 },
   empty: { color: C.textHint, fontSize: 14, textAlign: 'center', marginTop: 48, paddingHorizontal: 32 },
-
-  // Bottom nav (mock: .bn)
-  bn: {
-    height: 56,
-    flexDirection: 'row',
-    backgroundColor: C.bg,
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-  },
-  bnItem: {
-    flex: 1,
-    alignItems: 'center', justifyContent: 'center',
-    gap: 3,
-    position: 'relative',
-  },
-  bnPill: {
-    position: 'absolute',
-    top: 6,
-    width: 56, height: 30,
-    backgroundColor: C.accentDim,
-    borderRadius: 15,
-  },
-  bnLabel: { fontSize: 10, fontWeight: '500', color: C.textHint },
-  bnLabelActive: { color: C.accent },
 });
