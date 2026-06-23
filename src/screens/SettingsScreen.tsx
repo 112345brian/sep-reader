@@ -11,6 +11,8 @@ import {
   clearArticleCache, getZoteroPrefs, saveZoteroPrefs, getSyncFolder, setSyncFolder,
 } from '../services/db';
 import type { Prefs } from '../services/db';
+import { downloadAll, syncCachedArticles } from '../services/catalog';
+import type { DownloadProgress } from '../services/catalog';
 import { exportToSyncFolder, importFromSyncFolder } from '../services/dataSync';
 import type { RootStackParamList } from '../../App';
 
@@ -30,6 +32,10 @@ export default function SettingsScreen() {
   const [customCss, setCustomCss] = useState('');
   const [cssSaved, setCssSaved] = useState(false);
   const [fontSize, setFontSize] = useState(17);
+  const [dlProgress, setDlProgress] = useState<DownloadProgress | null>(null);
+  const [dlAbort, setDlAbort] = useState<AbortController | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [autoSync, setAutoSync] = useState<string>('off');
 
   useFocusEffect(useCallback(() => {
     getPrefs().then(setPrefs);
@@ -40,6 +46,7 @@ export default function SettingsScreen() {
     getSyncFolder().then(setSyncFolderState);
     getMeta('custom_css').then(v => setCustomCss(v ?? ''));
     getMeta('font_size').then(v => setFontSize(v ? parseInt(v, 10) : 17));
+    getMeta('auto_sync').then(v => setAutoSync(v ?? 'off'));
     loadCounts();
   }, []));
 
@@ -125,6 +132,41 @@ export default function SettingsScreen() {
   }
 
   const cachePercent = totalCount > 0 ? Math.round((cachedCount / totalCount) * 100) : 0;
+
+  async function handleDownloadAll() {
+    const abort = new AbortController();
+    setDlAbort(abort);
+    setDlProgress({ done: 0, total: 0, current: '' });
+    try {
+      await downloadAll(p => setDlProgress(p), abort.signal);
+    } finally {
+      setDlAbort(null);
+      setDlProgress(null);
+      loadCounts();
+    }
+  }
+
+  function cancelDownload() {
+    dlAbort?.abort();
+    setDlAbort(null);
+    setDlProgress(null);
+  }
+
+  async function handleSyncNow() {
+    setSyncing(true);
+    try {
+      await syncCachedArticles(() => {});
+      const now = new Date().toLocaleDateString();
+      setLastSync(now);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function setAutoSyncPref(value: string) {
+    setAutoSync(value);
+    await setMeta('auto_sync', value);
+  }
 
   return (
     <View style={styles.root}>
@@ -262,7 +304,31 @@ export default function SettingsScreen() {
         <Section title="Library">
           <Row label="Index entries" value={`${totalCount.toLocaleString()} articles`} />
           <Row label="Downloaded" value={`${cachedCount.toLocaleString()} (${cachePercent}%)`} />
-          {lastSync && <Row label="Last synced" value={lastSync} last />}
+          {lastSync && <Row label="Last synced" value={lastSync} />}
+          {dlProgress ? (
+            <>
+              <Row label="Downloading" value={`${dlProgress.done.toLocaleString()} / ${Math.max(dlProgress.total, 1).toLocaleString()}`} />
+              <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={cancelDownload} activeOpacity={0.7}>
+                <Text style={styles.destructiveLabel}>Cancel download</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={handleDownloadAll} activeOpacity={0.7}>
+              <Text style={styles.rowLabel}>Download all articles</Text>
+              <Text style={styles.rowValue}>{(totalCount - cachedCount).toLocaleString()} remaining</Text>
+            </TouchableOpacity>
+          )}
+        </Section>
+
+        {/* Auto-sync */}
+        <Section title="Auto-sync">
+          <OptionRow label="Off" selected={autoSync === 'off'} onPress={() => setAutoSyncPref('off')} />
+          <OptionRow label="Every 2 days" selected={autoSync === '2days'} onPress={() => setAutoSyncPref('2days')} />
+          <OptionRow label="Every week" selected={autoSync === '7days'} onPress={() => setAutoSyncPref('7days')} last />
+          <TouchableOpacity style={styles.saveBtn} onPress={handleSyncNow} disabled={syncing}>
+            <Text style={styles.saveBtnText}>{syncing ? 'Syncing…' : 'Check for updates now'}</Text>
+          </TouchableOpacity>
+          <Text style={styles.hint}>Re-fetches cached articles and picks up new entries from SEP.</Text>
         </Section>
 
         {/* Storage */}

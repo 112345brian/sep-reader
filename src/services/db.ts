@@ -440,6 +440,13 @@ export async function getAllUncachedSlugs(): Promise<{ slug: string; title: stri
   );
 }
 
+export async function getCachedSlugs(): Promise<{ slug: string; title: string }[]> {
+  const db = await getDb();
+  return db.getAllAsync<{ slug: string; title: string }>(
+    'SELECT slug, title FROM entries WHERE cached_at IS NOT NULL ORDER BY cached_at DESC'
+  );
+}
+
 // ── Citation ─────────────────────────────────────────────────────────────────
 
 export function formatCitation(entry: Pick<EntryRow, 'slug' | 'title' | 'author' | 'pub_date'>): string {

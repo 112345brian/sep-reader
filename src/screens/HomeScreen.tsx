@@ -4,6 +4,7 @@ import {
   StyleSheet, StatusBar, ActivityIndicator,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -96,6 +97,16 @@ export default function HomeScreen() {
     setAnnotations(anns);
   }, []);
 
+  const swipeLeft = Gesture.Pan()
+    .runOnJS(true)
+    .activeOffsetX([-30, 9999])
+    .failOffsetY([-20, 20])
+    .onEnd(e => {
+      if (e.translationX < -80 && e.velocityX < -100 && history.length > 0) {
+        nav.navigate('Article', { slug: history[0].slug, title: history[0].title });
+      }
+    });
+
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
   const handleSearch = (text: string) => {
@@ -143,6 +154,7 @@ export default function HomeScreen() {
   }, [annotations]);
 
   return (
+    <GestureDetector gesture={swipeLeft}>
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
@@ -273,6 +285,7 @@ export default function HomeScreen() {
         </>
       )}
     </View>
+    </GestureDetector>
   );
 }
 

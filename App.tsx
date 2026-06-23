@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, LogBox } from 'react-native';
 
 LogBox.ignoreAllLogs();
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services/db';
 import { syncOnLaunch } from './src/services/dataSync';
-import { refreshIndexIfStale, downloadAll } from './src/services/catalog';
+import { refreshIndexIfStale, downloadAll, syncCachedArticles } from './src/services/catalog';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import TestRunnerScreen from './src/screens/TestRunnerScreen';
@@ -97,6 +98,17 @@ export default function App() {
       refreshIndexIfStale(); // background, failures are silent
     }
 
+    // Auto-sync if interval has elapsed
+    const autoSync = await getMeta('auto_sync');
+    const lastDeepSync = await getMeta('last_deep_sync');
+    if (autoSync && autoSync !== 'off') {
+      const days = autoSync === '2days' ? 2 : 7;
+      const elapsed = Date.now() - (lastDeepSync ? Number(lastDeepSync) : 0);
+      if (elapsed > days * 24 * 60 * 60 * 1000) {
+        syncCachedArticles(() => {}).catch(() => {});
+      }
+    }
+
     setPhase('ready');
 
     // After nav is ready, handle "continue" mode
@@ -160,29 +172,31 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <NavigationContainer theme={THEME} ref={navRef}>
-        <Stack.Navigator id="root" screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Home" component={HomeScreen} />
-          <Stack.Screen name="Article" component={ArticleScreen} />
-          <Stack.Screen name="History" component={HistoryScreen} />
-          <Stack.Screen name="ReadingList" component={ReadingListScreen} />
-          <Stack.Screen name="Settings" component={SettingsScreen} />
-          <Stack.Screen name="Annotations" component={AnnotationsScreen} />
-          <Stack.Screen name="Graph" component={GraphScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
-      {downloadProgress && (
-        <View style={styles.downloadBar}>
-          <View
-            style={[
-              styles.downloadFill,
-              { width: `${(downloadProgress.done / downloadProgress.total) * 100}%` },
-            ]}
-          />
-        </View>
-      )}
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <NavigationContainer theme={THEME} ref={navRef}>
+          <Stack.Navigator id="root" screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Home" component={HomeScreen} />
+            <Stack.Screen name="Article" component={ArticleScreen} />
+            <Stack.Screen name="History" component={HistoryScreen} />
+            <Stack.Screen name="ReadingList" component={ReadingListScreen} />
+            <Stack.Screen name="Settings" component={SettingsScreen} />
+            <Stack.Screen name="Annotations" component={AnnotationsScreen} />
+            <Stack.Screen name="Graph" component={GraphScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+        {downloadProgress && (
+          <View style={styles.downloadBar}>
+            <View
+              style={[
+                styles.downloadFill,
+                { width: `${(downloadProgress.done / downloadProgress.total) * 100}%` },
+              ]}
+            />
+          </View>
+        )}
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

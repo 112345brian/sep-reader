@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, indexLinks } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks } from './db';
 import seedEntries from '../assets/entry-seed.json';
 
 const BASE = 'https://plato.stanford.edu';
@@ -58,6 +58,28 @@ export async function downloadAll(
     }));
     await new Promise<void>(r => setTimeout(r, 300));
   }
+}
+
+export async function syncCachedArticles(
+  onProgress: (p: DownloadProgress) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  await refreshIndexIfStale();
+  const slugs = await getCachedSlugs();
+  const total = slugs.length;
+  let done = 0;
+  const CONCURRENCY = 3;
+  for (let i = 0; i < slugs.length; i += CONCURRENCY) {
+    if (signal?.aborted) return;
+    const chunk = slugs.slice(i, i + CONCURRENCY);
+    await Promise.all(chunk.map(async ({ slug, title }) => {
+      await fetchAndCacheArticle(slug);
+      done++;
+      onProgress({ done, total, current: title });
+    }));
+    await new Promise<void>(r => setTimeout(r, 200));
+  }
+  await setMeta('last_deep_sync', String(Date.now()));
 }
 
 export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
