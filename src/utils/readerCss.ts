@@ -4,22 +4,22 @@
 
 export const READER_CSS = `
   :root {
-    --bg:          #121212;
-    --bg-raised:   #1a1a1a;
+    --bg:          #111111;
+    --bg-raised:   #1c1c1c;
     --bg-hover:    #222;
     --border:      #2a2a2a;
     --border-mid:  #333;
     --text:        #d0d0d0;
-    --text-bright: #e8e8e8;
+    --text-bright: #e4e4e4;
     --text-muted:  #888;
-    --accent:      #7ba4ff;
-    --accent-hi:   #a3c1ff;
+    --accent:      #5b8ef5;
+    --accent-hi:   #87adf8;
     --serif:       Georgia, 'Times New Roman', serif;
     --sans:        -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     --toc-width:   260px;
     --side-pad:    18px;
     --max-width:   680px;
-    --font-size:   20px;
+    --font-size:   16px;
   }
 
   /* ── Reset ─────────────────────────────────────────── */
@@ -39,8 +39,8 @@ export const READER_CSS = `
     padding: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: var(--serif);
-    line-height: 1.75;
+    font-family: var(--sans);
+    line-height: 1.78;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -329,18 +329,16 @@ export const READER_CSS = `
   /* Small top buffer so anchor targets aren't flush against the WebView edge */
   [id] { scroll-margin-top: 1rem; }
 
-  /* Title and preamble are rendered natively above the WebView */
-  h1.pagetitle, .pagetitle { display: none; }
-  #preamble { display: none; }
+  /* Title and preamble are rendered natively above the WebView — hide all forms */
+  h1, h1.pagetitle, .pagetitle { display: none !important; }
+  #preamble, .preamble { display: none !important; }
 
-  /* ── Mobile ─────────────────────────────────────────── */
+  /* ── Mobile (no font-size override — 16px is locked per ART-09) ─────────── */
   @media (max-width: 768px) {
     :root {
-      --font-size: 20px;
       --side-pad: 16px;
     }
 
-    /* TOC becomes a fixed left drawer — JS adds .toc-open to slide it in */
     #toc {
       width: min(82vw, 320px);
       transform: translateX(-110%);
@@ -363,11 +361,6 @@ export const READER_CSS = `
       padding-right: var(--side-pad);
     }
 
-    h1, .pagetitle {
-      font-size: 1.45rem;
-      letter-spacing: -0.01em;
-    }
-
     h2 {
       font-size: 1.2rem;
       padding-top: 1.75rem;
@@ -377,4 +370,27 @@ export const READER_CSS = `
 
     blockquote { margin: 1rem 0; }
   }
+
+  /* ── Backlinks row (ART-19) ─────────────────────────── */
+  .backlinks-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 1.5rem var(--side-pad) 2.5rem;
+    padding: 0.9rem 0 0;
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .backlinks-row .backlinks-badge {
+    margin-left: auto;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.05rem 0.5rem;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+  }
+  .backlinks-row svg { width: 15px; height: 15px; stroke: var(--text-muted); }
 `;

@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import type { EntryRow, EntrySummary, ReadRow, ReadNode, Session, Annotation } from '../types';
+import { makeExcerpt } from '../utils/excerpt';
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
@@ -24,6 +25,8 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       preamble_html TEXT,
       content_html TEXT,
       word_count   INTEGER DEFAULT 0,
+      read_progress REAL DEFAULT 0,
+      excerpt      TEXT,
       cached_at    INTEGER
     );
 
@@ -82,7 +85,24 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     db.runAsync('ALTER TABLE entries ADD COLUMN content_hash TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE bookmarks ADD COLUMN notes TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE annotations ADD COLUMN content_hash TEXT').catch(() => {}),
+    db.runAsync('ALTER TABLE entries ADD COLUMN read_progress REAL DEFAULT 0').catch(() => {}),
+    db.runAsync('ALTER TABLE entries ADD COLUMN excerpt TEXT').catch(() => {}),
   ]);
+
+  // One-time migration: clear articles cached before preamble_html column existed
+  // so they re-fetch with the corrected parser (title/preamble no longer embedded in content_html).
+  const didClear = await db.getFirstAsync<{ value: string }>(
+    `SELECT value FROM meta WHERE key = 'migrated_clear_cache_v2'`
+  );
+  if (!didClear) {
+    await db.runAsync(
+      `UPDATE entries SET content_html = NULL, preamble_html = NULL, toc_html = NULL,
+       excerpt = NULL, cached_at = NULL WHERE cached_at IS NOT NULL`
+    );
+    await db.runAsync(
+      `INSERT OR REPLACE INTO meta (key, value) VALUES ('migrated_clear_cache_v2', '1')`
+    );
+  }
 
   // Migrate FTS from content-table to standalone if needed, then ensure it exists
   const ftsInfo = await db.getFirstAsync<{ sql: string }>(
@@ -136,6 +156,7 @@ export async function cacheArticle(
   const db = await getDb();
   const wordCount = countWords(data.content_html ?? '');
   const hash = contentHash(data.content_html ?? '');
+  const excerpt = makeExcerpt(data.preamble_html || data.content_html || '');
   const now = Date.now();
 
   // Preserve the old version record before overwriting
@@ -153,11 +174,11 @@ export async function cacheArticle(
     `UPDATE entries SET
        author = ?, pub_date = ?, content_hash = ?,
        toc_html = ?, preamble_html = ?,
-       content_html = ?, word_count = ?, cached_at = ?
+       content_html = ?, word_count = ?, excerpt = ?, cached_at = ?
      WHERE slug = ?`,
     [data.author ?? null, data.pub_date ?? null, hash,
      data.toc_html ?? null, data.preamble_html ?? null,
-     data.content_html ?? null, wordCount, now, slug]
+     data.content_html ?? null, wordCount, excerpt, now, slug]
   );
 
   // Record the new version
@@ -179,6 +200,17 @@ export async function getArticleVersionDate(slug: string, hash: string): Promise
 export async function getEntry(slug: string): Promise<EntryRow | null> {
   const db = await getDb();
   return db.getFirstAsync<EntryRow>('SELECT * FROM entries WHERE slug = ?', [slug]);
+}
+
+// Lightweight row for graph node previews (no heavy content_html)
+export async function getEntryPreview(
+  slug: string
+): Promise<{ title: string; author: string | null; excerpt: string | null } | null> {
+  const db = await getDb();
+  return db.getFirstAsync<{ title: string; author: string | null; excerpt: string | null }>(
+    'SELECT title, author, excerpt FROM entries WHERE slug = ?',
+    [slug]
+  );
 }
 
 export async function searchEntries(query: string, limit = 60): Promise<EntrySummary[]> {
@@ -228,11 +260,24 @@ export async function recordRead(
   );
 }
 
+// Persist how far through an article the reader has scrolled (0..1).
+// Only ratchets upward so re-opening near the top doesn't erase progress.
+export async function setReadProgress(slug: string, progress: number): Promise<void> {
+  const db = await getDb();
+  const clamped = Math.max(0, Math.min(1, progress));
+  await db.runAsync(
+    'UPDATE entries SET read_progress = MAX(COALESCE(read_progress, 0), ?) WHERE slug = ?',
+    [clamped, slug]
+  );
+}
+
 export async function getRecentSlugs(limit = 20): Promise<EntrySummary[]> {
   const db = await getDb();
-  // Most recently read unique slugs
+  // Most recently read unique slugs, with progress / annotation count / excerpt
   return db.getAllAsync<EntrySummary>(
-    `SELECT r.slug, r.title, e.author, e.cached_at
+    `SELECT r.slug, r.title, e.author, e.cached_at,
+            e.read_progress, e.excerpt,
+            (SELECT COUNT(*) FROM annotations a WHERE a.slug = r.slug) AS annotation_count
      FROM reads r
      LEFT JOIN entries e USING (slug)
      GROUP BY r.slug
@@ -372,7 +417,9 @@ export async function isBookmarked(slug: string): Promise<boolean> {
 export async function getBookmarks(): Promise<EntrySummary[]> {
   const db = await getDb();
   return db.getAllAsync<EntrySummary>(
-    `SELECT b.slug, b.title, e.author, e.cached_at
+    `SELECT b.slug, b.title, e.author, e.cached_at,
+            e.read_progress, e.excerpt,
+            (SELECT COUNT(*) FROM annotations a WHERE a.slug = b.slug) AS annotation_count
      FROM bookmarks b
      LEFT JOIN entries e USING (slug)
      ORDER BY b.saved_at DESC`
