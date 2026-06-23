@@ -14,7 +14,7 @@ import type { RouteProp } from '@react-navigation/native';
 import {
   getEntry, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
-  getMeta, setReadProgress, getLinksTo,
+  getMeta, setReadProgress, getLinksTo, indexLinks,
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
@@ -180,6 +180,7 @@ export default function ArticleScreen() {
       getMeta('custom_css'),
       getMeta('font_size'),
       getLinksTo(slug),
+      indexLinks(slug, entry.content_html ?? ''),
     ]);
     const fontSize = fontSizeStr ? parseInt(fontSizeStr, 10) : undefined;
 
