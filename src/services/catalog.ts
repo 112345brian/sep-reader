@@ -3,6 +3,11 @@ import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getA
 const BASE = 'https://plato.stanford.edu';
 const INDEX_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 
+const SEP_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+};
+
 export async function refreshIndexIfStale(): Promise<void> {
   const lastRefresh = await getMeta('index_refreshed_at');
   const count = await getEntryCount();
@@ -48,7 +53,7 @@ export async function downloadAll(
 
 export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
   try {
-    const res = await fetch(`${BASE}/entries/${slug}/`);
+    const res = await fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS });
     if (!res.ok) return false;
     const html = await res.text();
 
@@ -76,7 +81,7 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
 }
 
 async function fetchEntryList(): Promise<{ slug: string; title: string }[]> {
-  const res = await fetch(`${BASE}/contents.html`);
+  const res = await fetch(`${BASE}/contents.html`, { headers: SEP_HEADERS });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
 
