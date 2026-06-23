@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   getPrefs, savePrefs, getEntryCount, getMeta, setMeta, getAllUncachedSlugs,
@@ -133,6 +134,14 @@ export default function SettingsScreen() {
 
   const cachePercent = totalCount > 0 ? Math.round((cachedCount / totalCount) * 100) : 0;
 
+  const swipeBack = Gesture.Pan()
+    .runOnJS(true)
+    .activeOffsetX([-9999, 30])
+    .failOffsetY([-22, 22])
+    .onEnd(e => {
+      if (e.translationX > 60 && e.velocityX > 100) nav.goBack();
+    });
+
   async function handleDownloadAll() {
     const abort = new AbortController();
     setDlAbort(abort);
@@ -169,6 +178,7 @@ export default function SettingsScreen() {
   }
 
   return (
+    <GestureDetector gesture={swipeBack}>
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <TouchableOpacity
@@ -177,7 +187,6 @@ export default function SettingsScreen() {
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
           <Text style={styles.backChevron}>‹</Text>
-          <Text style={styles.backLabel}>Library</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Settings</Text>
         <View style={styles.back} />
@@ -326,6 +335,7 @@ export default function SettingsScreen() {
         <Text style={styles.attributionUrl}>plato.stanford.edu</Text>
       </ScrollView>
     </View>
+    </GestureDetector>
   );
 }
 

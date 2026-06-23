@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wiki Reader — Android UX</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:            #111111;
+    --bg-surface:    #1c1c1c;
+    --bg-elevated:   #252525;
+    --bg-input:      #2a2a2a;
+    --border:        #2e2e2e;
+    --border-subtle: #222222;
+    --text:          #e4e4e4;
+    --text-sec:      #9a9a9a;
+    --text-hint:     #555555;
+    --accent:        #5b8ef5;
+    --accent-dim:    rgba(91,142,245,.14);
+    --accent-border: rgba(91,142,245,.35);
+    --hl-yellow:     rgba(251,191,36,.28);
+    --hl-yellow-s:   #fbbf24;
+    --hl-green:      rgba(52,211,153,.25);
+    --hl-green-s:    #34d399;
+    --hl-blue:       rgba(96,165,250,.28);
+    --hl-blue-s:     #60a5fa;
+    --hl-pink:       rgba(244,114,182,.28);
+    --hl-pink-s:     #f472b6;
+    --phone-w:       390px;
+    --phone-h:       780px;
+    --bar-h:         52px;
+    --status-h:      28px;
+  }
+
+  body {
+    background: #181818;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 72px 16px 60px;
+    font-family: "Roboto", -apple-system, system-ui, sans-serif;
+    gap: 0;
+  }
+
+  /* ── DEMO NAV ── */
+  .demo-nav {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 3px;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 32px;
+    padding: 4px;
+    z-index: 300;
+    box-shadow: 0 4px 20px rgba(0,0,0,.5);
+  }
+  .demo-btn {
+    padding: 5px 13px; border-radius: 24px;
+    font-size: 12px; font-weight: 500;
+    cursor: pointer; color: #777;
+    background: transparent; border: none;
+    font-family: inherit; white-space: nowrap;
+  }
+  .demo-btn.active { background: #e4e4e4; color: #111; }
+
+  /* ── PHONE SHELL ── */
+  .phone {
+    width: var(--phone-w);
+    height: var(--phone-h);
+    border-radius: 44px;
+    box-shadow:
+      0 0 0 10px #1a1a1a,
+      0 0 0 12px #333,
+      0 32px 100px rgba(0,0,0,.7);
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+    background: var(--bg);
+  }
+  .phone-screen {
+    position: absolute; inset: 0;
+    border-radius: 36px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  /* ── STATUS BAR ── */
+  .sb {
+    height: var(--status-h);
+    background: var(--bg);
+    display: flex; align-items: center;
+    justify-content: space-between;
+    padding: 0 22px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .sb-time { font-size: 12px; font-weight: 600; color: var(--text); }
+  .sb-icons { display: flex; gap: 4px; align-items: center; }
+
+  /* ── APP BAR ── */
+  .ab {
+    height: var(--bar-h);
+    background: var(--bg);
+    display: flex; align-items: center;
+    padding: 0 6px; gap: 2px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-subtle);
+    z-index: 10;
+  }
+  .ab-title {
+    flex: 1; font-size: 18px; font-weight: 600;
+    color: var(--text); padding: 0 6px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ib {
+    width: 42px; height: 42px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; background: transparent; border: none;
+    color: var(--text-sec); flex-shrink: 0;
+  }
+  .ib:active { background: rgba(255,255,255,.06); }
+  .ib svg { width: 21px; height: 21px; }
+
+  /* ── SCROLL ── */
+  .scroll {
+    flex: 1; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg);
+  }
+  .scroll::-webkit-scrollbar { display: none; }
+
+  /* ── BOTTOM NAV ── */
+  .bn {
+    height: 56px; background: var(--bg);
+    border-top: 1px solid var(--border);
+    display: flex; flex-shrink: 0; z-index: 10;
+  }
+  .bn-item {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 3px; cursor: pointer;
+    color: var(--text-hint); font-size: 10px; font-weight: 500;
+    position: relative;
+  }
+  .bn-item.active { color: var(--accent); }
+  .bn-item svg { width: 22px; height: 22px; }
+  .bn-pill {
+    position: absolute; top: 6px;
+    width: 56px; height: 30px;
+    background: var(--accent-dim);
+    border-radius: 15px;
+  }
+  svg { fill: none; stroke: currentColor; stroke-width: 1.8;
+        stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ════════════ HOME ════════════ */
+  .home-search {
+    margin: 14px 14px 12px;
+    height: 46px;
+    background: var(--bg-surface);
+    border-radius: 23px;
+    border: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 16px; cursor: pointer;
+  }
+  .home-search svg { width: 18px; height: 18px; color: var(--text-hint); flex-shrink: 0; }
+  .home-search-text { font-size: 14px; color: var(--text-hint); flex: 1; }
+  .avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: linear-gradient(135deg, #3b5fc0, #2d9c6e);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+  .sec-label {
+    padding: 14px 16px 6px;
+    font-size: 11px; font-weight: 600;
+    letter-spacing: .07em; text-transform: uppercase;
+    color: var(--text-hint);
+  }
+  .page-row {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 13px 16px; cursor: pointer;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .page-row:active { background: rgba(255,255,255,.03); }
+  .page-row-icon {
+    width: 38px; height: 38px; border-radius: 8px;
+    background: var(--bg-surface);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; color: var(--text-hint);
+  }
+  .page-row-icon svg { width: 17px; height: 17px; }
+  .page-row-body { flex: 1; min-width: 0; }
+  .page-row-title { font-size: 14px; font-weight: 500; color: var(--text); line-height: 1.3; }
+  .page-row-meta { font-size: 12px; color: var(--text-hint); margin-top: 2px; }
+  .page-row-chev { color: var(--text-hint); align-self: center; }
+  .page-row-chev svg { width: 15px; height: 15px; }
+
+  /* ════════════ ARTICLE ════════════ */
+  .article-wrap { padding: 0 0 96px; }
+  .edge-hint-left {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: linear-gradient(to right, var(--accent-border), transparent);
+    opacity: .7; pointer-events: none; z-index: 5;
+  }
+  .edge-hint-right {
+    position: absolute; right: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: linear-gradient(to left, #444, transparent);
+    opacity: .5; pointer-events: none; z-index: 5;
+  }
+  .article-header {
+    padding: 22px 18px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .article-cat {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .article-title {
+    font-size: 26px; font-weight: 700;
+    line-height: 1.2; letter-spacing: -.02em;
+    color: var(--text); margin-bottom: 12px;
+  }
+  .article-meta {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--text-hint);
+  }
+  .article-meta-dot { opacity: .4; }
+  .article-annot-count {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: 12px;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent-border);
+    font-size: 11px; font-weight: 500;
+    color: var(--accent); margin-left: auto;
+    cursor: pointer;
+  }
+  .article-annot-count svg { width: 11px; height: 11px; }
+
+  .prose {
+    padding: 18px 18px 0;
+    font-size: 16px; line-height: 1.78;
+    color: #d0d0d0;
+  }
+  .prose p { margin-bottom: 18px; }
+  .prose h2 {
+    font-size: 18px; font-weight: 600;
+    margin: 28px 0 10px; color: var(--text);
+    letter-spacing: -.01em;
+    padding-top: 4px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .prose h3 { font-size: 15px; font-weight: 600; margin: 20px 0 8px; color: var(--text); }
+  .prose ul { padding-left: 18px; margin-bottom: 18px; }
+  .prose li { margin-bottom: 6px; }
+  .prose blockquote {
+    border-left: 2px solid var(--border);
+    padding: 10px 14px;
+    color: var(--text-sec);
+    margin: 18px 0;
+    background: var(--bg-surface);
+    border-radius: 0 6px 6px 0;
+    font-size: 15px;
+  }
+  code {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 13px; background: var(--bg-elevated);
+    padding: 1px 5px; border-radius: 4px;
+    color: #c4b5fd;
+  }
+  .wl { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(91,142,245,.3); }
+  .wl-missing { color: var(--text-hint); text-decoration: underline dashed; text-underline-offset: 3px; }
+
+  /* Highlights */
+  .hl { border-radius: 2px; cursor: pointer; }
+  .hl-y { background: var(--hl-yellow); }
+  .hl-g { background: var(--hl-green); }
+  .hl-b { background: var(--hl-blue); }
+  .hl-p { background: var(--hl-pink); }
+
+  /* Annotation note indicator */
+  .note-dot {
+    display: inline-block;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--hl-yellow-s);
+    margin-left: 2px; margin-bottom: 1px;
+    vertical-align: middle;
+  }
+
+  /* Annotation card (inline note) */
+  .annot-card {
+    margin: -4px 0 14px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--hl-yellow-s);
+    border-radius: 0 8px 8px 0;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--text-sec);
+    line-height: 1.5;
+  }
+
+  .backlinks-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 15px 18px; border-top: 1px solid var(--border-subtle);
+    font-size: 13px; color: var(--text-sec); cursor: pointer;
+    margin-top: 8px;
+  }
+  .backlinks-row svg { width: 16px; height: 16px; color: var(--text-hint); }
+  .backlinks-badge {
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1px 8px;
+    font-size: 11px; color: var(--text-hint);
+    margin-left: auto;
+  }
+
+
+  /* ════════════ ANNOTATION MODE ════════════ */
+  .selection-overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,.15);
+    z-index: 8; pointer-events: none;
+  }
+
+  /* Selected text visual in article */
+  .hl-selecting {
+    background: rgba(91,142,245,.35);
+    border-radius: 2px;
+  }
+
+  /* Selection handles */
+  .sel-handle {
+    position: absolute;
+    width: 10px; height: 10px;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+
+  /* Highlight toolbar */
+  .hl-toolbar {
+    position: absolute;
+    left: 50%; transform: translateX(-50%);
+    bottom: 90px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px 12px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.6);
+    z-index: 20;
+    white-space: nowrap;
+  }
+  .hl-color {
+    width: 26px; height: 26px; border-radius: 50%;
+    cursor: pointer; flex-shrink: 0;
+    border: 2px solid transparent;
+  }
+  .hl-color.selected { border-color: #fff; transform: scale(1.15); }
+  .hl-toolbar-sep { width: 1px; height: 22px; background: var(--border); }
+  .hl-action {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12px; font-weight: 500;
+    color: var(--text-sec); cursor: pointer; padding: 4px 6px;
+    border-radius: 6px;
+  }
+  .hl-action:active { background: rgba(255,255,255,.06); }
+  .hl-action svg { width: 15px; height: 15px; }
+
+  /* Note input sheet (bottom) */
+  .note-sheet {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border);
+    border-radius: 14px 14px 0 0;
+    padding: 10px 14px 16px;
+    z-index: 20;
+  }
+  .note-sheet-handle {
+    width: 32px; height: 4px; background: var(--border);
+    border-radius: 2px; margin: 0 auto 12px;
+  }
+  .note-sheet-label { font-size: 11px; color: var(--text-hint); margin-bottom: 6px; letter-spacing: .04em; text-transform: uppercase; font-weight: 600; }
+  .note-sheet-quote {
+    font-size: 13px; color: var(--text-sec); line-height: 1.5;
+    padding: 8px 10px; background: var(--bg-elevated);
+    border-left: 2px solid var(--hl-yellow-s);
+    border-radius: 0 5px 5px 0;
+    margin-bottom: 10px;
+  }
+  .note-sheet-input {
+    width: 100%; background: var(--bg-elevated);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font-size: 14px; color: var(--text);
+    font-family: inherit; resize: none; outline: none;
+    caret-color: var(--accent); min-height: 70px;
+  }
+  .note-sheet-row {
+    display: flex; justify-content: flex-end; gap: 8px;
+    margin-top: 10px;
+  }
+  .btn {
+    padding: 7px 16px; border-radius: 8px;
+    font-size: 13px; font-weight: 500;
+    cursor: pointer; border: none; font-family: inherit;
+  }
+  .btn-ghost { background: transparent; color: var(--text-sec); }
+  .btn-primary { background: var(--accent); color: #fff; }
+
+  /* ════════════ TOC PANEL ════════════ */
+  .three-panel {
+    display: flex; width: calc(var(--phone-w) * 3);
+    height: 100%; flex-shrink: 0;
+    transition: transform .25s cubic-bezier(.25,.1,.25,1);
+  }
+  .panel {
+    width: var(--phone-w); flex-shrink: 0;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .toc-header {
+    height: var(--bar-h); background: var(--bg);
+    display: flex; align-items: center;
+    padding: 0 16px; gap: 10px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .toc-header-title {
+    font-size: 14px; font-weight: 600;
+    color: var(--text-sec); letter-spacing: .04em;
+    text-transform: uppercase; font-size: 12px;
+  }
+  .toc-list { flex: 1; overflow-y: auto; background: var(--bg); }
+  .toc-list::-webkit-scrollbar { display: none; }
+  .toc-item {
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: pointer;
+  }
+  .toc-item:active { background: rgba(255,255,255,.03); }
+  .toc-num { font-size: 12px; color: var(--text-hint); min-width: 20px; line-height: 1.5; }
+  .toc-text { font-size: 14px; color: var(--text); line-height: 1.5; }
+  .toc-item.h3 { padding-left: 36px; }
+  .toc-item.h3 .toc-text { font-size: 13px; color: var(--text-sec); }
+  .toc-article-edge {
+    width: 40px; flex-shrink: 0;
+    background: var(--bg-surface);
+    border-left: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    opacity: .5;
+  }
+  .toc-article-edge svg { width: 16px; height: 16px; color: var(--text-hint); }
+
+  /* ════════════ RECENT PANEL ════════════ */
+  .recent-header {
+    height: var(--bar-h); background: var(--bg);
+    display: flex; align-items: center;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .recent-title { font-size: 12px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--text-hint); }
+  .recent-article-edge {
+    width: 40px; flex-shrink: 0;
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    opacity: .5;
+  }
+  .recent-article-edge svg { width: 16px; height: 16px; color: var(--text-hint); }
+  .recent-list { flex: 1; overflow-y: auto; background: var(--bg); }
+  .recent-list::-webkit-scrollbar { display: none; }
+  .recent-item {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: pointer;
+  }
+  .recent-item:active { background: rgba(255,255,255,.03); }
+  .recent-item-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0; margin-top: 6px;
+  }
+  .recent-item-body { flex: 1; min-width: 0; }
+  .recent-item-title { font-size: 14px; font-weight: 500; color: var(--text); line-height: 1.35; }
+  .recent-item-meta { font-size: 12px; color: var(--text-hint); margin-top: 3px; }
+  .recent-item-progress {
+    width: 100%; height: 2px; background: var(--bg-elevated);
+    border-radius: 1px; margin-top: 7px;
+  }
+  .recent-item-progress-fill {
+    height: 100%; border-radius: 1px;
+    background: var(--text-hint);
+  }
+
+  /* ════════════ SEARCH ════════════ */
+  .search-ab {
+    height: var(--bar-h); background: var(--bg);
+    display: flex; align-items: center; gap: 4px;
+    padding: 0 8px; border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .search-input {
+    flex: 1; height: 38px;
+    border: none; outline: none;
+    font-size: 16px; color: var(--text);
+    background: transparent; font-family: inherit;
+    caret-color: var(--accent);
+  }
+  .chips {
+    display: flex; gap: 8px; padding: 10px 14px;
+    overflow-x: auto; border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 13px; border-radius: 20px;
+    font-size: 12px; font-weight: 500; white-space: nowrap;
+    border: 1px solid var(--border); color: var(--text-sec);
+    background: transparent; cursor: pointer;
+  }
+  .chip.active {
+    background: var(--accent-dim); border-color: var(--accent-border);
+    color: var(--accent);
+  }
+  .sr {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 13px 16px; cursor: pointer;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .sr:active { background: rgba(255,255,255,.03); }
+  .sr-icon { color: var(--text-hint); flex-shrink: 0; margin-top: 2px; }
+  .sr-icon svg { width: 18px; height: 18px; }
+  .sr-body { flex: 1; min-width: 0; }
+  .sr-title { font-size: 14px; font-weight: 500; color: var(--text); }
+  .sr-title mark { background: rgba(251,191,36,.3); color: var(--text); border-radius: 2px; font-weight: 600; }
+  .sr-path { font-size: 11px; color: var(--text-hint); margin-top: 2px; }
+  .sr-excerpt { font-size: 12px; color: var(--text-sec); margin-top: 4px; line-height: 1.5; }
+  .sr-excerpt mark { background: transparent; font-weight: 600; color: var(--text-sec); }
+
+  /* ════════════ SCREEN SWITCHER ════════════ */
+  .screen { display: none; height: 100%; flex-direction: column; }
+  .screen.visible { display: flex; }
+</style>
+</head>
+<body>
+
+<div class="demo-nav">
+  <button class="demo-btn active" onclick="show('home')">Home</button>
+  <button class="demo-btn" onclick="show('article')">Article</button>
+  <button class="demo-btn" onclick="show('annotate')">Annotate</button>
+  <button class="demo-btn" onclick="show('graph')">Swipe down</button>
+  <button class="demo-btn" onclick="show('toc')">Swipe up</button>
+</div>
+
+<div class="phone">
+  <div class="phone-screen">
+
+    <!-- ══════════════ HOME ══════════════ -->
+    <div id="screen-home" class="screen visible">
+      <div class="sb">
+        <span class="sb-time">9:41</span>
+        <div class="sb-icons">
+          <svg width="14" height="14" viewBox="0 0 24 24" style="color:#e4e4e4"><path d="M1 6h22M5 10h14M9 14h6"/></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" style="color:#e4e4e4"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M20 10h2v4h-2"/></svg>
+        </div>
+      </div>
+      <div class="ab" style="border-bottom:none;">
+        <div class="ab-title" style="font-size:22px;font-weight:700;letter-spacing:-.02em;">Wiki</div>
+        <button class="ib">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
+      <div class="home-search" onclick="show('search')" id="search-trigger">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+        <span class="home-search-text">Search pages...</span>
+      </div>
+
+      <div class="scroll">
+        <div class="sec-label">Continue reading</div>
+        <div class="page-row" onclick="show('article')">
+          <div class="page-row-icon">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+          </div>
+          <div class="page-row-body">
+            <div class="page-row-title">Content Delivery</div>
+            <div class="page-row-meta">Systems · 67% read · 3 annotations</div>
+            <div style="width:100%;height:2px;background:#2a2a2a;border-radius:1px;margin-top:7px;">
+              <div style="width:67%;height:100%;background:#5b8ef5;border-radius:1px;opacity:.6;"></div>
+            </div>
+          </div>
+          <div class="page-row-chev"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></div>
+        </div>
+        <div class="page-row">
+          <div class="page-row-icon">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+          </div>
+          <div class="page-row-body">
+            <div class="page-row-title">Auth Service</div>
+            <div class="page-row-meta">Systems · 30% read · 1 annotation</div>
+            <div style="width:100%;height:2px;background:#2a2a2a;border-radius:1px;margin-top:7px;">
+              <div style="width:30%;height:100%;background:#5b8ef5;border-radius:1px;opacity:.6;"></div>
+            </div>
+          </div>
+          <div class="page-row-chev"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></div>
+        </div>
+
+        <div class="sec-label">Browse</div>
+        <div class="page-row">
+          <div class="page-row-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+          <div class="page-row-body">
+            <div class="page-row-title">Systems</div>
+            <div class="page-row-meta">14 pages</div>
+          </div>
+          <div class="page-row-chev"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></div>
+        </div>
+        <div class="page-row">
+          <div class="page-row-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+          <div class="page-row-body">
+            <div class="page-row-title">Engineering</div>
+            <div class="page-row-meta">22 pages</div>
+          </div>
+          <div class="page-row-chev"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></div>
+        </div>
+        <div class="page-row">
+          <div class="page-row-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+          <div class="page-row-body">
+            <div class="page-row-title">Runbooks</div>
+            <div class="page-row-meta">8 pages</div>
+          </div>
+          <div class="page-row-chev"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></div>
+        </div>
+        <div style="height:8px;"></div>
+      </div>
+
+      <div class="bn">
+        <div class="bn-item active">
+          <div class="bn-pill"></div>
+          <svg viewBox="0 0 24 24" style="position:relative;"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          <span>Home</span>
+        </div>
+        <div class="bn-item" onclick="show('search')">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+          <span>Search</span>
+        </div>
+        <div class="bn-item">
+          <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Notes</span>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ══════════════ ARTICLE ══════════════ -->
+    <div id="screen-article" class="screen" style="position:relative;">
+      <div class="sb"><span class="sb-time">9:41</span><div class="sb-icons"><svg width="14" height="14" viewBox="0 0 24 24" style="color:#e4e4e4"><path d="M1 6h22M5 10h14M9 14h6"/></svg><svg width="12" height="12" viewBox="0 0 24 24" style="color:#e4e4e4"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M20 10h2v4h-2"/></svg></div></div>
+      <div class="ab">
+        <button class="ib" onclick="show('home')"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button>
+        <div style="flex:1;"></div>
+        <button class="ib"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg></button>
+        <button class="ib"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/></svg></button>
+      </div>
+
+      <!-- Edge hints -->
+      <div class="edge-hint-left" title="Swipe right to go home"></div>
+      <!-- Swipe-up affordance -->
+      <div onclick="show('toc')" style="position:absolute;bottom:20px;left:0;right:0;height:44px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:10px;z-index:5;pointer-events:auto;background:linear-gradient(to top,rgba(17,17,17,0.95) 50%,transparent 100%);">
+        <div style="width:40px;height:4px;background:#555;border-radius:2px;"></div>
+      </div>
+
+      <div class="scroll">
+        <div class="article-wrap">
+          <div class="article-header">
+            <div class="article-cat">Systems / Architecture</div>
+            <h1 class="article-title">Content Delivery</h1>
+            <div class="article-meta">
+              <span>Updated 2 h ago</span>
+              <span class="article-meta-dot">·</span>
+              <span>4 min</span>
+              <div class="article-annot-count" onclick="show('annotate')">
+                <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                3 notes
+              </div>
+            </div>
+          </div>
+
+          <div class="prose">
+            <p>
+              The content delivery layer handles all asset serving for the application. It sits in front of the
+              <a class="wl">Origin Servers</a> and provides <span class="hl hl-y">edge caching at PoPs across 12 regions<span class="note-dot"></span></span>.
+              See <a class="wl">Cache Invalidation Strategy</a> for the rules governing TTLs.
+            </p>
+
+            <div class="annot-card">
+              Check whether the 12-region claim is still current — last I heard we were expanding to APAC.
+            </div>
+
+            <h2>Architecture overview</h2>
+            <p>
+              Requests arrive at the <a class="wl">Global Load Balancer</a>, which routes to the nearest healthy PoP.
+              If the requested asset is cached (<span class="hl hl-g">hit ratio ~94%</span>), it is served directly.
+              On a miss, the PoP fetches from origin and caches the response per the <a class="wl">Caching Policy</a>.
+            </p>
+            <p>
+              The <a class="wl">Auth Service</a> issues short-lived signed URLs for private assets.
+              These tokens embed the user ID and expiry;
+              <span class="hl hl-b">the edge validates them without an origin roundtrip</span>.
+            </p>
+
+            <h2>Configuration</h2>
+            <p>The main knobs in <code>cdn.config.ts</code>:</p>
+            <ul>
+              <li><strong>TTL</strong> — default 3600 s; overridable per content type</li>
+              <li><strong>Vary headers</strong> — always vary on Accept-Encoding</li>
+              <li><strong>Stale-while-revalidate</strong> — 60 s for HTML, 0 for JSON</li>
+            </ul>
+
+            <blockquote>
+              The CDN is the first line of defense for traffic spikes. During the March incident
+              it absorbed 40x normal load with no latency increase.
+            </blockquote>
+
+            <h2>Known gaps</h2>
+            <p>
+              Streaming responses currently bypass the CDN — the <a class="wl wl-missing">Streaming Cache RFC</a> is tracking the design.
+              Image optimization (<a class="wl wl-missing">Image Pipeline</a>) is also not yet hooked in.
+            </p>
+          </div>
+
+          <div class="backlinks-row">
+            <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span>7 pages link here</span>
+            <span class="backlinks-badge">7</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+
+    <!-- ══════════════ ANNOTATE ══════════════ -->
+    <div id="screen-annotate" class="screen" style="position:relative;">
+      <div class="sb"><span class="sb-time">9:41</span><div class="sb-icons"><svg width="14" height="14" viewBox="0 0 24 24" style="color:#e4e4e4"><path d="M1 6h22M5 10h14M9 14h6"/></svg><svg width="12" height="12" viewBox="0 0 24 24" style="color:#e4e4e4"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M20 10h2v4h-2"/></svg></div></div>
+      <div class="ab">
+        <div class="ab-title" style="font-size:13px;color:var(--text-sec);">Content Delivery</div>
+      </div>
+
+      <div class="scroll" style="user-select:none;">
+        <div class="article-wrap">
+          <div class="article-header">
+            <div class="article-cat">Systems / Architecture</div>
+            <h1 class="article-title">Content Delivery</h1>
+          </div>
+          <div class="prose">
+            <p>
+              The content delivery layer handles all asset serving for the application. It sits in front of the
+              <a class="wl">Origin Servers</a> and provides <span class="hl hl-y">edge caching at PoPs across 12 regions</span>.
+              See <a class="wl">Cache Invalidation Strategy</a> for TTL rules.
+            </p>
+            <h2>Architecture overview</h2>
+            <p>
+              Requests arrive at the <a class="wl">Global Load Balancer</a>, which routes to the nearest healthy PoP.
+              If the requested asset is cached (<span class="hl hl-g">hit ratio ~94%</span>), it is served directly.
+              On a miss, the PoP fetches from origin and caches the response per the <a class="wl">Caching Policy</a>.
+            </p>
+            <p>
+              The <a class="wl">Auth Service</a> issues short-lived signed URLs.
+              <span class="hl hl-selecting">These tokens embed the user ID and expiry; the edge validates them</span> without an origin roundtrip.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Highlight toolbar -->
+      <div class="hl-toolbar">
+        <div class="hl-color selected" style="background:var(--hl-yellow-s);"></div>
+        <div class="hl-color" style="background:var(--hl-green-s);"></div>
+        <div class="hl-color" style="background:var(--hl-blue-s);"></div>
+        <div class="hl-color" style="background:var(--hl-pink-s);"></div>
+        <div class="hl-toolbar-sep"></div>
+        <div class="hl-action">
+          <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Note
+        </div>
+        <div class="hl-action">
+          <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Copy
+        </div>
+      </div>
+
+      <!-- Note input sheet -->
+      <div class="note-sheet">
+        <div class="note-sheet-handle"></div>
+        <div class="note-sheet-label">Note on highlight</div>
+        <div class="note-sheet-quote">"These tokens embed the user ID and expiry; the edge validates them"</div>
+        <textarea class="note-sheet-input" placeholder="Add a note..."></textarea>
+        <div class="note-sheet-row">
+          <button class="btn btn-ghost" onclick="show('article')">Cancel</button>
+          <button class="btn btn-primary" onclick="show('article')">Save</button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ══════════════ GRAPH (swiped down from article top) ══════════════ -->
+    <div id="screen-graph" class="screen">
+      <div class="sb"><span class="sb-time">9:41</span><div class="sb-icons"><svg width="14" height="14" viewBox="0 0 24 24" style="color:#e4e4e4"><path d="M1 6h22M5 10h14M9 14h6"/></svg><svg width="12" height="12" viewBox="0 0 24 24" style="color:#e4e4e4"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M20 10h2v4h-2"/></svg></div></div>
+      <div class="ab">
+        <button class="ib" onclick="show('article')"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+        <div style="flex:1;display:flex;flex-direction:column;padding:0 4px;">
+          <span style="font-size:11px;color:var(--text-hint);font-weight:500;letter-spacing:.05em;text-transform:uppercase;">Graph</span>
+          <span style="font-size:14px;font-weight:600;color:var(--text);">Content Delivery</span>
+        </div>
+        <button class="ib"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg></button>
+      </div>
+
+      <!-- Graph canvas -->
+      <div style="flex:1;overflow:hidden;position:relative;background:var(--bg);">
+        <!--
+          Layout (center=195,255, r=135):
+            Edge Caching      0°  → (195, 120)
+            Cache Invalidation 60° → (117+195, 255-67)=(312,188) -- sin60=0.866,cos60=0.5
+            Caching Policy   140°  → (195+87, 255+104)=(282,359) -- sin140=0.643,cos140=-0.766
+            Auth Service     220°  → (195-87, 255+104)=(108,359) -- sin220=-0.643,cos220=-0.766
+            Origin Servers   290°  → (195-127, 255-46)=(68,209) -- sin290=-0.940,cos290=0.342 → r=135:(-127,-46)
+            Post-mortem(bkl) 265°  → r=125: (195-125,255+11)=(70,266) -- dim node, left
+            Streaming(miss)  180°  → r=160: (195,415) -- directly below
+        -->
+        <!-- Container 700px. viewBox 390×700 = 1:1. Center (195,330) = 47% down.
+             Second-hop dim nodes fill top/bottom corners to eliminate dead space. -->
+        <svg viewBox="0 0 390 700" width="390" height="100%" style="display:block;">
+
+          <!-- ── second-hop edges (barely visible — populate corners) ── -->
+          <line x1="68"  y1="88"  x2="64"  y2="229" stroke="#1d1d1d" stroke-width="1"/>
+          <line x1="312" y1="96"  x2="195" y2="161" stroke="#1d1d1d" stroke-width="1"/>
+          <line x1="338" y1="548" x2="298" y2="444" stroke="#1d1d1d" stroke-width="1"/>
+          <line x1="50"  y1="558" x2="92"  y2="444" stroke="#1d1d1d" stroke-width="1"/>
+
+          <!-- ── main edges (center → outer) ── -->
+          <line x1="195" y1="316" x2="195" y2="169" stroke="#253848" stroke-width="1.5"/>
+          <line x1="204" y1="317" x2="318" y2="244" stroke="#253848" stroke-width="1.5"/>
+          <line x1="204" y1="343" x2="290" y2="444" stroke="#253848" stroke-width="1.5"/>
+          <line x1="185" y1="343" x2="100" y2="444" stroke="#2d3f58" stroke-width="2"/>
+          <line x1="182" y1="318" x2="72"  y2="244" stroke="#253848" stroke-width="1.5"/>
+          <!-- backlink -->
+          <line x1="182" y1="340" x2="76"  y2="399" stroke="#252525" stroke-width="1.5" stroke-dasharray="5 3"/>
+          <!-- missing page -->
+          <line x1="193" y1="344" x2="193" y2="524" stroke="#1e1e1e" stroke-width="1"   stroke-dasharray="3 4"/>
+          <!-- outer-to-outer secondary -->
+          <line x1="64"  y1="247" x2="195" y2="179" stroke="#1c2a3a" stroke-width="1"/>
+          <line x1="92"  y1="456" x2="70"  y2="406" stroke="#1c2a3a" stroke-width="1"/>
+
+          <!-- ── glow rings ── -->
+          <circle cx="195" cy="330" r="32" fill="rgba(91,142,245,0.07)"/>
+          <circle cx="195" cy="330" r="22" fill="rgba(91,142,245,0.13)"/>
+
+          <!-- ── second-hop nodes ── -->
+          <circle cx="68"  cy="82"  r="5" fill="#1a1a1a" stroke="#252525" stroke-width="1.2"/>
+          <circle cx="312" cy="90"  r="5" fill="#1a1a1a" stroke="#252525" stroke-width="1.2"/>
+          <circle cx="338" cy="554" r="5" fill="#1a1a1a" stroke="#252525" stroke-width="1.2"/>
+          <circle cx="50"  cy="564" r="5" fill="#1a1a1a" stroke="#252525" stroke-width="1.2"/>
+
+          <!-- ── main nodes ── -->
+          <circle cx="195" cy="330" r="14" fill="#5b8ef5"/>
+          <circle cx="195" cy="161" r="9"  fill="#1e3352" stroke="#2d4a6e" stroke-width="1.5"/>
+          <circle cx="326" cy="238" r="9"  fill="#1e3352" stroke="#2d4a6e" stroke-width="1.5"/>
+          <circle cx="298" cy="452" r="10" fill="#1e3352" stroke="#2d4a6e" stroke-width="1.5"/>
+          <circle cx="92"  cy="452" r="12" fill="#243f62" stroke="#3a5a88" stroke-width="1.5"/>
+          <circle cx="64"  cy="238" r="9"  fill="#1e3352" stroke="#2d4a6e" stroke-width="1.5"/>
+          <circle cx="70"  cy="403" r="7"  fill="#1c1c1c" stroke="#2e2e2e" stroke-width="1.5"/>
+          <circle cx="193" cy="530" r="7"  fill="none"   stroke="#2a2a2a" stroke-width="1.5" stroke-dasharray="3 2"/>
+
+          <!-- ── second-hop labels ── -->
+          <text x="68"  y="66"  text-anchor="middle" font-size="9"  font-family="system-ui,sans-serif" style="fill:#3d3d3d;stroke:none">TCP Anycast</text>
+          <text x="312" y="74"  text-anchor="middle" font-size="9"  font-family="system-ui,sans-serif" style="fill:#3d3d3d;stroke:none">HTTP Cache-Control</text>
+          <text x="338" y="570" text-anchor="middle" font-size="9"  font-family="system-ui,sans-serif" style="fill:#3d3d3d;stroke:none">Load Shedding</text>
+          <text x="50"  y="580" text-anchor="middle" font-size="9"  font-family="system-ui,sans-serif" style="fill:#3d3d3d;stroke:none">Session Store</text>
+
+          <!-- ── main labels ── -->
+          <text x="195" y="352" text-anchor="middle" font-size="13" font-weight="600" font-family="system-ui,sans-serif" style="fill:#7ba8f7;stroke:none">Content Delivery</text>
+          <text x="195" y="144" text-anchor="middle" font-size="12" font-family="system-ui,sans-serif" style="fill:#b0c4d8;stroke:none">Edge Caching</text>
+          <text x="310" y="222" text-anchor="end"    font-size="11" font-family="system-ui,sans-serif" style="fill:#b0c4d8;stroke:none">Cache Invalidation</text>
+          <text x="298" y="471" text-anchor="middle" font-size="12" font-family="system-ui,sans-serif" style="fill:#b0c4d8;stroke:none">Caching Policy</text>
+          <text x="92"  y="472" text-anchor="middle" font-size="12" font-family="system-ui,sans-serif" style="fill:#c0d4e8;stroke:none">Auth Service</text>
+          <text x="64"  y="222" text-anchor="middle" font-size="11" font-family="system-ui,sans-serif" style="fill:#b0c4d8;stroke:none">Origin Servers</text>
+          <text x="70"  y="386" text-anchor="middle" font-size="10" font-family="system-ui,sans-serif" style="fill:#666;stroke:none">Post-mortem:</text>
+          <text x="70"  y="399" text-anchor="middle" font-size="10" font-family="system-ui,sans-serif" style="fill:#666;stroke:none">March Spike</text>
+          <text x="193" y="548" text-anchor="middle" font-size="11" font-family="system-ui,sans-serif" style="fill:#555;stroke:none">Streaming Cache RFC</text>
+
+        </svg>
+
+        <!-- Legend -->
+        <div style="position:absolute;bottom:16px;left:16px;display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-hint);">
+            <svg width="20" height="4" viewBox="0 0 20 4"><line x1="0" y1="2" x2="20" y2="2" stroke="#2d3f58" stroke-width="2"/></svg>
+            linked
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-hint);">
+            <svg width="20" height="4" viewBox="0 0 20 4"><line x1="0" y1="2" x2="20" y2="2" stroke="#333" stroke-width="1.5" stroke-dasharray="4 3"/></svg>
+            backlink only
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-hint);">
+            <svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="none" stroke="#2d2d2d" stroke-width="1.5" stroke-dasharray="3 2"/></svg>
+            missing page
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ TOC (swiped left — panel from right) ══════════════ -->
+    <div id="screen-toc" class="screen" style="position:relative;overflow:hidden;">
+      <!-- Article visible behind sheet (dimmed) -->
+      <div style="position:absolute;inset:0;display:flex;flex-direction:column;pointer-events:none;">
+        <div class="sb"><span class="sb-time">9:41</span><div class="sb-icons"><svg width="14" height="14" viewBox="0 0 24 24" style="color:#e4e4e4"><path d="M1 6h22M5 10h14M9 14h6"/></svg><svg width="12" height="12" viewBox="0 0 24 24" style="color:#e4e4e4"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M20 10h2v4h-2"/></svg></div></div>
+        <div class="ab" style="border-bottom:1px solid var(--border-subtle);">
+          <button class="ib"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button>
+          <div style="flex:1;"></div>
+          <button class="ib"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg></button>
+          <button class="ib"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/></svg></button>
+        </div>
+        <div style="padding:24px 20px 0;opacity:0.28;overflow:hidden;">
+          <div style="font-size:22px;font-weight:700;color:var(--text);margin-bottom:4px;">Content Delivery</div>
+          <div style="font-size:12px;color:var(--text-hint);margin-bottom:18px;">Systems · 67% read</div>
+          <div style="font-size:16px;color:var(--text);line-height:1.75;">Requests arrive at the <span style="background:var(--hl-yellow);border-radius:2px;padding:0 2px;">Global Load Balancer</span>, which routes to the nearest healthy PoP. Edge nodes check their local cache before forwarding upstream.</div>
+          <div style="font-size:16px;color:var(--text);line-height:1.75;margin-top:14px;">The default TTL for dynamic content is set to zero, requiring explicit opt-in for caching at each layer.</div>
+        </div>
+      </div>
+
+      <!-- Scrim -->
+      <div style="position:absolute;inset:0;background:rgba(0,0,0,0.55);" onclick="show('article')"></div>
+
+      <!-- Bottom sheet -->
+      <div style="position:absolute;bottom:0;left:0;right:0;height:66%;background:var(--bg-surface);border-radius:14px 14px 0 0;display:flex;flex-direction:column;overflow:hidden;">
+        <!-- drag handle -->
+        <div style="width:36px;height:4px;background:var(--border);border-radius:2px;margin:10px auto 0;flex-shrink:0;"></div>
+        <!-- tab bar -->
+        <div style="display:flex;border-bottom:1px solid var(--border-subtle);margin-top:4px;flex-shrink:0;">
+          <button id="toc-tab-contents" onclick="tocTab('contents')" style="flex:1;padding:12px 0;font-size:13px;font-weight:600;color:var(--accent);background:none;border:none;border-bottom:2px solid var(--accent);cursor:pointer;font-family:inherit;">Contents</button>
+          <button id="toc-tab-annots" onclick="tocTab('annots')" style="flex:1;padding:12px 0;font-size:13px;font-weight:500;color:var(--text-hint);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-family:inherit;">Annotations <span style="display:inline-block;background:var(--accent-dim);color:var(--accent);border-radius:10px;font-size:11px;padding:1px 6px;margin-left:2px;">3</span></button>
+        </div>
+
+        <!-- Contents panel -->
+        <div id="toc-panel-contents" style="flex:1;overflow-y:auto;">
+          <div class="toc-item" onclick="show('article')"><span class="toc-num">1</span><span class="toc-text">Architecture overview</span></div>
+          <div class="toc-item" onclick="show('article')"><span class="toc-num">2</span><span class="toc-text">Configuration</span></div>
+          <div class="toc-item h3"  onclick="show('article')"><span class="toc-num">2.1</span><span class="toc-text">TTL settings</span></div>
+          <div class="toc-item h3"  onclick="show('article')"><span class="toc-num">2.2</span><span class="toc-text">Vary headers</span></div>
+          <div class="toc-item h3"  onclick="show('article')"><span class="toc-num">2.3</span><span class="toc-text">Stale-while-revalidate</span></div>
+          <div class="toc-item" onclick="show('article')"><span class="toc-num">3</span><span class="toc-text">Known gaps</span></div>
+          <div class="toc-item" onclick="show('article')"><span class="toc-num">4</span><span class="toc-text">See also</span></div>
+        </div>
+
+        <!-- Annotations panel (hidden by default) -->
+        <div id="toc-panel-annots" style="flex:1;overflow-y:auto;display:none;">
+          <!-- Section group -->
+          <div style="padding:10px 16px 4px;font-size:11px;font-weight:600;color:var(--text-hint);letter-spacing:.06em;text-transform:uppercase;">Architecture overview</div>
+          <div style="margin:0 12px 10px;background:var(--bg-elevated);border-radius:8px;overflow:hidden;">
+            <div style="padding:10px 12px;border-left:3px solid var(--hl-yellow-s);">
+              <div style="font-size:13px;color:var(--text);line-height:1.6;">"Requests arrive at the Global Load Balancer, which routes to the nearest healthy PoP."</div>
+              <div style="font-size:12px;color:var(--text-sec);margin-top:6px;line-height:1.5;">Need to verify failover behaviour when primary PoP is degraded.</div>
+            </div>
+          </div>
+          <div style="margin:0 12px 10px;background:var(--bg-elevated);border-radius:8px;overflow:hidden;">
+            <div style="padding:10px 12px;border-left:3px solid var(--hl-blue-s);">
+              <div style="font-size:13px;color:var(--text);line-height:1.6;">"Edge nodes check their local cache before forwarding upstream."</div>
+            </div>
+          </div>
+          <!-- Section group -->
+          <div style="padding:10px 16px 4px;font-size:11px;font-weight:600;color:var(--text-hint);letter-spacing:.06em;text-transform:uppercase;">Configuration</div>
+          <div style="margin:0 12px 14px;background:var(--bg-elevated);border-radius:8px;overflow:hidden;">
+            <div style="padding:10px 12px;border-left:3px solid var(--hl-green-s);">
+              <div style="font-size:13px;color:var(--text);line-height:1.6;">"The default TTL for dynamic content is set to zero."</div>
+              <div style="font-size:12px;color:var(--text-sec);margin-top:6px;line-height:1.5;">Check if this applies to the image pipeline too — see Image Pipeline page.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+
+
+    <!-- ══════════════ SEARCH ══════════════ -->
+    <div id="screen-search" class="screen">
+      <div class="sb"><span class="sb-time">9:41</span><div class="sb-icons"><svg width="14" height="14" viewBox="0 0 24 24" style="color:#e4e4e4"><path d="M1 6h22M5 10h14M9 14h6"/></svg><svg width="12" height="12" viewBox="0 0 24 24" style="color:#e4e4e4"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M20 10h2v4h-2"/></svg></div></div>
+      <div class="search-ab">
+        <button class="ib" onclick="show('home')"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button>
+        <input class="search-input" type="text" value="content del" placeholder="Search...">
+        <button class="ib"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="chips">
+        <div class="chip active">All</div>
+        <div class="chip">Pages</div>
+        <div class="chip">Systems</div>
+        <div class="chip">Engineering</div>
+        <div class="chip">Runbooks</div>
+      </div>
+      <div class="scroll">
+        <div class="sr" onclick="show('article')">
+          <div class="sr-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+          <div class="sr-body">
+            <div class="sr-title"><mark>Content Del</mark>ivery</div>
+            <div class="sr-path">Systems / Architecture</div>
+          </div>
+        </div>
+        <div class="sr">
+          <div class="sr-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+          <div class="sr-body">
+            <div class="sr-title">Caching Policy</div>
+            <div class="sr-path">Systems / Architecture</div>
+            <div class="sr-excerpt">...per-asset TTLs for <mark>content del</mark>ivery layer; see also CDN config...</div>
+          </div>
+        </div>
+        <div class="sr">
+          <div class="sr-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+          <div class="sr-body">
+            <div class="sr-title">Global Load Balancer</div>
+            <div class="sr-path">Systems / Architecture</div>
+            <div class="sr-excerpt">...routes to <mark>Content Del</mark>ivery after health checks pass...</div>
+          </div>
+        </div>
+        <div class="sr">
+          <div class="sr-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+          <div class="sr-body">
+            <div class="sr-title">Post-mortem: March Spike</div>
+            <div class="sr-path">Engineering / Incidents</div>
+            <div class="sr-excerpt">...<mark>content del</mark>ivery CDN absorbed 40x normal load with no latency...</div>
+          </div>
+        </div>
+        <div class="sr">
+          <div class="sr-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+          <div class="sr-body">
+            <div class="sr-title">Edge Caching</div>
+            <div class="sr-path">Systems / Architecture</div>
+            <div class="sr-excerpt">...deployed at each PoP in the <mark>content del</mark>ivery network...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /phone-screen -->
+</div><!-- /phone -->
+
+<script>
+  const SCREENS = ['home','article','annotate','graph','toc'];
+  function show(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('visible'));
+    document.querySelectorAll('.demo-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('screen-' + id).classList.add('visible');
+    const idx = SCREENS.indexOf(id);
+    if (idx >= 0) document.querySelectorAll('.demo-btn')[idx]?.classList.add('active');
+  }
+
+  function tocTab(tab) {
+    const isContents = tab === 'contents';
+    document.getElementById('toc-panel-contents').style.display = isContents ? 'block' : 'none';
+    document.getElementById('toc-panel-annots').style.display   = isContents ? 'none'  : 'block';
+    const tabC = document.getElementById('toc-tab-contents');
+    const tabA = document.getElementById('toc-tab-annots');
+    tabC.style.color        = isContents ? 'var(--accent)' : 'var(--text-hint)';
+    tabC.style.borderBottom = isContents ? '2px solid var(--accent)' : '2px solid transparent';
+    tabA.style.color        = isContents ? 'var(--text-hint)' : 'var(--accent)';
+    tabA.style.borderBottom = isContents ? '2px solid transparent' : '2px solid var(--accent)';
+  }
+</script>
+</body>
+</html>

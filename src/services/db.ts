@@ -447,6 +447,13 @@ export async function getCachedSlugs(): Promise<{ slug: string; title: string }[
   );
 }
 
+export async function getAllEntryTitles(): Promise<{ slug: string; title: string }[]> {
+  const db = await getDb();
+  return db.getAllAsync<{ slug: string; title: string }>(
+    `SELECT slug, title FROM entries WHERE LENGTH(title) > 3 ORDER BY LENGTH(title) DESC`
+  );
+}
+
 // ── Citation ─────────────────────────────────────────────────────────────────
 
 export function formatCitation(entry: Pick<EntryRow, 'slug' | 'title' | 'author' | 'pub_date'>): string {

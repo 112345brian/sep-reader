@@ -16,6 +16,9 @@ export interface EntrySummary {
   title: string;
   author: string | null;
   cached_at: number | null;
+  read_progress?: number | null;   // 0..1 fraction read
+  annotation_count?: number;        // notes on this entry
+  excerpt?: string | null;          // plain-text snippet for home rows
 }
 
 export interface ReadRow {

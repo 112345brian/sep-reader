@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "blind-design",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-p", "4747", "blind-design"],
+      "port": 4747
+    }
+  ]
+}

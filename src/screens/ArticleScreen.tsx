@@ -5,6 +5,9 @@ import {
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue, useAnimatedStyle, withSpring, runOnJS,
+} from 'react-native-reanimated';
 import WebView from 'react-native-webview';
 import type { WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,7 +17,7 @@ import type { RouteProp } from '@react-navigation/native';
 import {
   getEntry, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
-  getMeta, setReadProgress, getLinksTo, indexLinks,
+  getMeta, setReadProgress, getLinksTo, indexLinks, getAllEntryTitles,
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
@@ -120,6 +123,10 @@ function IconGraph({ color = '#9a9a9a' }: { color?: string }) {
 
 export default function ArticleScreen() {
   const insets = useSafeAreaInsets();
+  const screenX = useSharedValue(0);
+  const animatedScreenStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: screenX.value }],
+  }));
   const nav = useNavigation<Nav>();
   const { slug, title, fromSlug = null } = useRoute<Route>().params;
 
@@ -200,10 +207,70 @@ export default function ArticleScreen() {
     });
   }
 
+  const handleLinkInject = useCallback(async () => {
+    if (!webRef.current) return;
+    const raw = await getAllEntryTitles();
+    // Pre-escape regex special chars in TypeScript (no double-escape hell in template strings)
+    // Cap at 700 entries — sorted longest-first, so most-specific titles are included
+    const entries = raw.slice(0, 700).map(e => ({
+      s: e.slug,
+      t: e.title,
+      p: e.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    }));
+    const payload = JSON.stringify(entries);
+    const script = `
+(function() {
+  try {
+    var E = ${payload};
+    if (!E.length) return;
+    var linked = Object.create(null);
+    var map = Object.create(null);
+    for (var i = 0; i < E.length; i++) { map[E[i].t.toLowerCase()] = E[i].s; }
+    var re = new RegExp('(?:' + E.map(function(e){return e.p;}).join('|') + ')', 'gi');
+    function processText(node) {
+      var text = node.textContent; re.lastIndex = 0;
+      var mx = [], m;
+      while ((m = re.exec(text)) !== null) mx.push({i: m.index, l: m[0].length, v: m[0]});
+      re.lastIndex = 0;
+      if (!mx.length) return;
+      var frag = document.createDocumentFragment(), last = 0, changed = false;
+      for (var j = 0; j < mx.length; j++) {
+        var x = mx[j], lo = x.v.toLowerCase();
+        if (x.i > last) frag.appendChild(document.createTextNode(text.slice(last, x.i)));
+        if (!linked[lo]) {
+          linked[lo] = true;
+          var a = document.createElement('a');
+          a.href = '/entries/' + map[lo] + '/'; a.className = 'wl'; a.textContent = x.v;
+          frag.appendChild(a); changed = true;
+        } else {
+          frag.appendChild(document.createTextNode(x.v));
+        }
+        last = x.i + x.l;
+      }
+      if (!changed) return;
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode && node.parentNode.replaceChild(frag, node);
+    }
+    var SKIP = {A:1,SCRIPT:1,STYLE:1,CODE:1,PRE:1,H1:1,H2:1,H3:1,CITE:1};
+    function walk(el) {
+      if (!el) return;
+      if (el.nodeType === 3) { processText(el); return; }
+      if (el.nodeType !== 1 || SKIP[el.tagName]) return;
+      Array.prototype.slice.call(el.childNodes).forEach(walk);
+    }
+    walk(document.getElementById('aueditable') || document.body);
+  } catch(err) { console.warn('autolink', err); }
+})();
+true;
+`;
+    webRef.current.injectJavaScript(script);
+  }, []);
+
   const handleLoadEnd = useCallback(() => {
     setWebReady(true);
     if (annotations.length > 0) injectAnnotations(annotations);
-  }, [annotations]);
+    handleLinkInject();
+  }, [annotations, handleLinkInject]);
 
   function injectAnnotations(anns: Annotation[]) {
     webRef.current?.injectJavaScript(
@@ -310,16 +377,29 @@ export default function ArticleScreen() {
   const openGraph = () =>
     nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle });
 
+  const navBack = useCallback(() => nav.goBack(), [nav]);
+  const navBackTop = useCallback(() => nav.popToTop(), [nav]);
+
   // ── Gestures (non-overlapping zones so the WebView keeps its own scroll) ──
 
   // Swipe RIGHT anywhere in the reading area → home. Cancels if the drag is
   // vertical-first (failOffsetY), so normal article scrolling is untouched.
   const swipeHome = Gesture.Pan()
-    .runOnJS(true)
-    .activeOffsetX([-9999, 30])      // only a rightward drag activates
-    .failOffsetY([-22, 22])          // a vertical drag hands control to the WebView
+    .activeOffsetX([-9999, 30])
+    .failOffsetY([-22, 22])
+    .onUpdate(e => {
+      'worklet';
+      if (e.translationX > 0) screenX.value = e.translationX;
+    })
     .onEnd(e => {
-      if (e.translationX > 80 && e.velocityX > 0) nav.goBack();
+      'worklet';
+      if (e.translationX > 80 && e.velocityX > 150) {
+        screenX.value = withSpring(500, { damping: 22, stiffness: 260 }, () => {
+          runOnJS(navBack)();
+        });
+      } else {
+        screenX.value = withSpring(0, { damping: 22, stiffness: 260 });
+      }
     });
 
   // Swipe DOWN on the header → graph view (mockup: "swipe down from top").
@@ -341,7 +421,7 @@ export default function ArticleScreen() {
   const tocGesture = Gesture.Exclusive(tocSwipe, tocTap);
 
   return (
-    <View style={styles.root}>
+    <Animated.View style={[styles.root, animatedScreenStyle]}>
       {/* ── App bar (swipe down → graph) ── */}
       <GestureDetector gesture={swipeGraph}>
       <View style={[styles.appBar, { paddingTop: insets.top }]}>
@@ -475,7 +555,7 @@ export default function ArticleScreen() {
           setEditingAnnotation(null);
         }}
       />
-    </View>
+    </Animated.View>
   );
 }
 
@@ -578,16 +658,13 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', zIndex: 10,
   },
 
-  // mock: position:absolute, bottom:0, left:0, right:0, height:44px
-  // gradient from rgba(17,17,17,.95) to transparent, pill at bottom
   tocHandle: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,
-    height: 44,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    paddingBottom: 10,
-    backgroundColor: 'rgba(17,17,17,0.88)',
+    paddingBottom: 8,
     zIndex: 6,
   },
   tocHandlePill: {

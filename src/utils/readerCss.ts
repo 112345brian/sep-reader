@@ -164,12 +164,31 @@ export const READER_CSS = `
   em, i { color: var(--text); }
 
   /* ── Links ──────────────────────────────────────────── */
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; text-decoration-color: var(--accent); }
-  a:visited { color: var(--accent); }
+  a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: rgba(91, 142, 245, 0.35);
+    text-underline-offset: 2px;
+  }
+
+  a:hover {
+    text-decoration-color: var(--accent);
+  }
+
+  a:visited {
+    color: #a88be8;
+    text-decoration-color: rgba(168, 139, 232, 0.35);
+  }
 
   /* Internal wiki-links (SEP cross-references) */
-  a.wl { border-bottom: 1px solid rgba(91,142,245,0.3); }
+  a.wl {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: rgba(91, 142, 245, 0.5);
+    text-underline-offset: 2px;
+  }
+
+  a.wl:visited { color: #a88be8; }
 
   /* External links */
   a[href^="http"]:not([href*="plato.stanford.edu"]) {
@@ -321,7 +340,7 @@ export const READER_CSS = `
 
   /* ── Utility / SEP-specific elements ─────────────────── */
   /* Hide SEP site chrome that's not relevant in-app */
-  #related-entries, #academic-tools, #other-internet-resources,
+  #academic-tools, #other-internet-resources,
   #sep-man-links, #nav, .main-nav, #footerwrap { display: none; }
 
   hr {
