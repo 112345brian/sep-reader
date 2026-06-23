@@ -454,6 +454,37 @@ export async function getAllEntryTitles(): Promise<{ slug: string; title: string
   );
 }
 
+export async function getAllEntries(): Promise<{ slug: string; title: string }[]> {
+  const db = await getDb();
+  return db.getAllAsync<{ slug: string; title: string }>(
+    `SELECT slug, title FROM entries WHERE title IS NOT NULL ORDER BY title ASC`
+  );
+}
+
+// Link index: pre-built once at index-sync time, cached in meta.
+// Module-level cache so we only hit the DB once per app session.
+let _linkCache: string | null = null;
+
+export async function getLinkPayload(): Promise<string> {
+  if (_linkCache) return _linkCache;
+  const stored = await getMeta('link_index_json');
+  if (stored) { _linkCache = stored; return stored; }
+  // Build on demand if not yet indexed (first launch before any sync)
+  const entries = await getAllEntryTitles();
+  _linkCache = JSON.stringify(
+    entries.slice(0, 700).map(e => ({
+      s: e.slug,
+      t: e.title,
+      p: e.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    }))
+  );
+  return _linkCache;
+}
+
+export function invalidateLinkCache(): void {
+  _linkCache = null;
+}
+
 // ── Citation ─────────────────────────────────────────────────────────────────
 
 export function formatCitation(entry: Pick<EntryRow, 'slug' | 'title' | 'author' | 'pub_date'>): string {

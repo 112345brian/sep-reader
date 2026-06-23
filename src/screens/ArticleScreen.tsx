@@ -17,7 +17,7 @@ import type { RouteProp } from '@react-navigation/native';
 import {
   getEntry, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
-  getMeta, setReadProgress, getLinksTo, indexLinks, getAllEntryTitles,
+  getMeta, setReadProgress, getLinksTo, indexLinks, getLinkPayload,
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
@@ -209,15 +209,7 @@ export default function ArticleScreen() {
 
   const handleLinkInject = useCallback(async () => {
     if (!webRef.current) return;
-    const raw = await getAllEntryTitles();
-    // Pre-escape regex special chars in TypeScript (no double-escape hell in template strings)
-    // Cap at 700 entries — sorted longest-first, so most-specific titles are included
-    const entries = raw.slice(0, 700).map(e => ({
-      s: e.slug,
-      t: e.title,
-      p: e.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-    }));
-    const payload = JSON.stringify(entries);
+    const payload = await getLinkPayload();
     const script = `
 (function() {
   try {

@@ -1,14 +1,17 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, FlatList, TouchableOpacity,
-  StyleSheet, StatusBar, ActivityIndicator, Alert,
+  View, Text, TextInput, FlatList, SectionList, TouchableOpacity,
+  StyleSheet, StatusBar, ActivityIndicator, Alert, PanResponder,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { searchEntries, getRecentSlugs, getBookmarks, getAllAnnotations, toggleBookmark } from '../services/db';
+import {
+  searchEntries, getRecentSlugs, getBookmarks, getAllAnnotations,
+  toggleBookmark, getAllEntries,
+} from '../services/db';
 import type { EntrySummary } from '../types';
 import type { AnnotationWithTitle } from '../services/db';
 import type { RootStackParamList } from '../../App';
@@ -63,7 +66,7 @@ function IconDots({ size = 21, color = C.textHint }: { size?: number; color?: st
   );
 }
 
-// ── Component ──────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────
 
 interface ArticleGroup {
   slug: string;
@@ -71,11 +74,103 @@ interface ArticleGroup {
   items: AnnotationWithTitle[];
 }
 
+interface BrowseSection {
+  title: string; // the letter
+  data: { slug: string; title: string }[];
+}
+
+// ── AlphabetScrubber ───────────────────────────────────────────────────────
+
+function AlphabetScrubber({
+  letters,
+  onSelect,
+}: {
+  letters: string[];
+  onSelect: (letter: string) => void;
+}) {
+  const [active, setActive] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const containerRef = useRef<View>(null);
+  const metricsRef = useRef({ top: 0, height: 0 });
+  const activeRef = useRef<string | null>(null);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  const lettersRef = useRef(letters);
+  lettersRef.current = letters;
+
+  function pickLetter(pageY: number, top: number, height: number): string {
+    const rel = Math.max(0, Math.min(0.9999, (pageY - top) / height));
+    const idx = Math.floor(rel * lettersRef.current.length);
+    return lettersRef.current[idx] ?? lettersRef.current[lettersRef.current.length - 1];
+  }
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: evt => {
+        containerRef.current?.measure((_x, _y, _w, h, _px, py) => {
+          metricsRef.current = { top: py, height: h };
+          const letter = pickLetter(evt.nativeEvent.pageY, py, h);
+          activeRef.current = letter;
+          setExpanded(true);
+          setActive(letter);
+          onSelectRef.current(letter);
+        });
+      },
+      onPanResponderMove: evt => {
+        const { top, height } = metricsRef.current;
+        if (height === 0) return;
+        const letter = pickLetter(evt.nativeEvent.pageY, top, height);
+        if (letter !== activeRef.current) {
+          activeRef.current = letter;
+          setActive(letter);
+          onSelectRef.current(letter);
+        }
+      },
+      onPanResponderRelease: () => {
+        setExpanded(false);
+        setActive(null);
+        activeRef.current = null;
+      },
+      onPanResponderTerminate: () => {
+        setExpanded(false);
+        setActive(null);
+        activeRef.current = null;
+      },
+    })
+  ).current;
+
+  return (
+    <View
+      ref={containerRef}
+      style={[styles.scrubber, expanded && styles.scrubberExpanded]}
+      {...panResponder.panHandlers}
+    >
+      {letters.map(letter => (
+        <Text
+          key={letter}
+          style={[styles.scrubberLetter, active === letter && styles.scrubberLetterActive]}
+        >
+          {letter}
+        </Text>
+      ))}
+      {active && (
+        <View style={styles.scrubberBubble} pointerEvents="none">
+          <Text style={styles.scrubberBubbleText}>{active}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── Component ──────────────────────────────────────────────────────────────
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
 
-  const [activeTab, setActiveTab]     = useState<'reading' | 'notes'>('reading');
+  const [activeTab, setActiveTab]     = useState<'reading' | 'notes' | 'browse'>('reading');
   const [isSearchActive, setSearchActive] = useState(false);
   const [query, setQuery]             = useState('');
   const [results, setResults]         = useState<EntrySummary[]>([]);
@@ -83,8 +178,13 @@ export default function HomeScreen() {
   const [bookmarks, setBookmarks]     = useState<EntrySummary[]>([]);
   const [annotations, setAnnotations] = useState<AnnotationWithTitle[]>([]);
   const [searching, setSearching]     = useState(false);
-  const searchInputRef                = useRef<TextInput>(null);
-  const debounce                      = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [browseEntries, setBrowseEntries] = useState<{ slug: string; title: string }[]>([]);
+  const [browseLoaded, setBrowseLoaded]   = useState(false);
+
+  const searchInputRef = useRef<TextInput>(null);
+  const debounce       = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sectionListRef = useRef<SectionList<{ slug: string; title: string }>>(null);
 
   const loadData = useCallback(async () => {
     const [h, b, anns] = await Promise.all([
@@ -96,6 +196,16 @@ export default function HomeScreen() {
     setBookmarks(b);
     setAnnotations(anns);
   }, []);
+
+  // Load browse entries lazily on first activation
+  useEffect(() => {
+    if (activeTab === 'browse' && !browseLoaded) {
+      getAllEntries().then(entries => {
+        setBrowseEntries(entries);
+        setBrowseLoaded(true);
+      });
+    }
+  }, [activeTab, browseLoaded]);
 
   const swipeLeft = Gesture.Pan()
     .runOnJS(true)
@@ -167,6 +277,32 @@ export default function HomeScreen() {
     return Array.from(map.values());
   }, [annotations]);
 
+  const browseSections = useMemo<BrowseSection[]>(() => {
+    const groups: Record<string, { slug: string; title: string }[]> = {};
+    for (const e of browseEntries) {
+      const letter = e.title[0]?.toUpperCase() ?? '#';
+      if (!groups[letter]) groups[letter] = [];
+      groups[letter].push(e);
+    }
+    return Object.keys(groups).sort().map(letter => ({
+      title: letter,
+      data: groups[letter],
+    }));
+  }, [browseEntries]);
+
+  const browseLetters = useMemo(() => browseSections.map(s => s.title), [browseSections]);
+
+  const handleAlphaSelect = useCallback((letter: string) => {
+    const idx = browseSections.findIndex(s => s.title === letter);
+    if (idx < 0 || !sectionListRef.current) return;
+    sectionListRef.current.scrollToLocation({
+      sectionIndex: idx,
+      itemIndex: 0,
+      animated: false,
+      viewPosition: 0,
+    });
+  }, [browseSections]);
+
   return (
     <GestureDetector gesture={swipeLeft}>
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -234,6 +370,10 @@ export default function HomeScreen() {
               <Text style={[styles.tabLabel, activeTab === 'notes' && styles.tabLabelActive]}>Notes</Text>
               {activeTab === 'notes' && <View style={styles.tabUnderline} />}
             </TouchableOpacity>
+            <TouchableOpacity style={styles.tabBtn} onPress={() => setActiveTab('browse')} activeOpacity={0.7}>
+              <Text style={[styles.tabLabel, activeTab === 'browse' && styles.tabLabelActive]}>Browse</Text>
+              {activeTab === 'browse' && <View style={styles.tabUnderline} />}
+            </TouchableOpacity>
           </View>
 
           {/* ── Reading tab ── */}
@@ -295,6 +435,42 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               )}
             />
+          )}
+
+          {/* ── Browse tab ── */}
+          {activeTab === 'browse' && (
+            <View style={styles.browseContainer}>
+              {!browseLoaded ? (
+                <ActivityIndicator color={C.accent} style={{ marginTop: 64 }} />
+              ) : (
+                <>
+                  <SectionList
+                    ref={sectionListRef}
+                    sections={browseSections}
+                    keyExtractor={item => item.slug}
+                    contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingLeft: 32 }}
+                    stickySectionHeadersEnabled
+                    onScrollToIndexFailed={() => {}}
+                    renderSectionHeader={({ section }) => (
+                      <View style={styles.browseHeader}>
+                        <Text style={styles.browseHeaderText}>{section.title}</Text>
+                      </View>
+                    )}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={styles.browseRow}
+                        onPress={() => open(item.slug, item.title)}
+                        activeOpacity={0.5}
+                      >
+                        <Text style={styles.browseRowText} numberOfLines={1}>{item.title}</Text>
+                        <IconChevron size={13} />
+                      </TouchableOpacity>
+                    )}
+                  />
+                  <AlphabetScrubber letters={browseLetters} onSelect={handleAlphaSelect} />
+                </>
+              )}
+            </View>
           )}
         </>
       )}
@@ -506,6 +682,85 @@ const styles = StyleSheet.create({
   noteMore: {
     fontSize: 12, color: C.textHint,
     marginTop: 2,
+  },
+
+  // Browse tab
+  browseContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  browseHeader: {
+    backgroundColor: C.bg,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderSubtle,
+  },
+  browseHeaderText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: C.accent,
+  },
+  browseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderSubtle,
+  },
+  browseRowText: {
+    flex: 1,
+    fontSize: 14,
+    color: C.text,
+  },
+
+  // Alphabet scrubber
+  scrubber: {
+    position: 'absolute',
+    left: 0,
+    top: 0, bottom: 0,
+    width: 18,
+    alignItems: 'center',
+    justifyContent: 'space-evenly',
+    paddingVertical: 4,
+    backgroundColor: 'transparent',
+  },
+  scrubberExpanded: {
+    width: 26,
+    backgroundColor: 'rgba(28,28,28,0.92)',
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+  },
+  scrubberLetter: {
+    fontSize: 9,
+    fontWeight: '500',
+    color: C.textHint,
+    lineHeight: 11,
+  },
+  scrubberLetterActive: {
+    color: C.accent,
+    fontWeight: '700',
+    fontSize: 10,
+  },
+  scrubberBubble: {
+    position: 'absolute',
+    left: 30,
+    top: '50%',
+    width: 48, height: 48,
+    borderRadius: 24,
+    backgroundColor: C.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    transform: [{ translateY: -24 }],
+    elevation: 8,
+  },
+  scrubberBubbleText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
   },
 
   hint: { color: C.textHint, fontSize: 15, lineHeight: 22, textAlign: 'center', marginTop: 80, paddingHorizontal: 32 },

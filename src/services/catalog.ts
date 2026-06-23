@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache } from './db';
 import seedEntries from '../assets/entry-seed.json';
 
 const BASE = 'https://plato.stanford.edu';
@@ -30,7 +30,22 @@ export async function refreshIndexIfStale(): Promise<void> {
   if (entries.length > 0) {
     await upsertIndexEntries(entries);
     await setMeta('index_refreshed_at', String(Date.now()));
+    // Rebuild link index in background after new index data lands
+    buildLinkIndex().catch(() => {});
   }
+}
+
+async function buildLinkIndex(): Promise<void> {
+  const entries = await getAllEntryTitles();
+  const payload = JSON.stringify(
+    entries.slice(0, 700).map(e => ({
+      s: e.slug,
+      t: e.title,
+      p: e.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    }))
+  );
+  await setMeta('link_index_json', payload);
+  invalidateLinkCache();
 }
 
 export type DownloadProgress = {
