@@ -469,15 +469,9 @@ export async function getLinkPayload(): Promise<string> {
   if (_linkCache) return _linkCache;
   const stored = await getMeta('link_index_json');
   if (stored) { _linkCache = stored; return stored; }
-  // Build on demand if not yet indexed (first launch before any sync)
-  const entries = await getAllEntryTitles();
-  _linkCache = JSON.stringify(
-    entries.slice(0, 700).map(e => ({
-      s: e.slug,
-      t: e.title,
-      p: e.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-    }))
-  );
+  // Fall back to the bundled asset (available immediately on first launch, before any sync)
+  const { LINK_MAP_JSON } = await import('../assets/linkMapData');
+  _linkCache = LINK_MAP_JSON;
   return _linkCache;
 }
 
