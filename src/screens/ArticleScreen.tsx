@@ -17,7 +17,7 @@ import type { RouteProp } from '@react-navigation/native';
 import {
   getEntry, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
-  getMeta, setReadProgress, getLinksTo, indexLinks, getLinkPayload,
+  getMeta, setReadProgress, getLinksTo, indexLinks,
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
@@ -207,88 +207,10 @@ export default function ArticleScreen() {
     });
   }
 
-  const handleLinkInject = useCallback(async () => {
-    if (!webRef.current) return;
-    const payload = await getLinkPayload();
-    const script = `
-(function() {
-  try {
-    var E = ${payload};
-    if (!E.length) return;
-    // linked + map + re are shared across all observer callbacks for the whole article
-    var linked = Object.create(null);
-    var map = Object.create(null);
-    for (var i = 0; i < E.length; i++) { map[E[i].t.toLowerCase()] = E[i].s; }
-    var re = new RegExp('(?:' + E.map(function(e){return e.p;}).join('|') + ')', 'gi');
-
-    function processText(node) {
-      var text = node.textContent; re.lastIndex = 0;
-      var mx = [], m;
-      while ((m = re.exec(text)) !== null) mx.push({i: m.index, l: m[0].length, v: m[0]});
-      re.lastIndex = 0;
-      if (!mx.length) return;
-      var frag = document.createDocumentFragment(), last = 0, changed = false;
-      for (var j = 0; j < mx.length; j++) {
-        var x = mx[j], lo = x.v.toLowerCase();
-        if (x.i > last) frag.appendChild(document.createTextNode(text.slice(last, x.i)));
-        if (!linked[lo]) {
-          linked[lo] = true;
-          var a = document.createElement('a');
-          a.href = '/entries/' + map[lo] + '/'; a.className = 'wl'; a.textContent = x.v;
-          frag.appendChild(a); changed = true;
-        } else {
-          frag.appendChild(document.createTextNode(x.v));
-        }
-        last = x.i + x.l;
-      }
-      if (!changed) return;
-      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-      node.parentNode && node.parentNode.replaceChild(frag, node);
-    }
-
-    var SKIP = {A:1,SCRIPT:1,STYLE:1,CODE:1,PRE:1,H1:1,H2:1,H3:1,CITE:1};
-    function walk(el) {
-      if (!el) return;
-      if (el.nodeType === 3) { processText(el); return; }
-      if (el.nodeType !== 1 || SKIP[el.tagName]) return;
-      Array.prototype.slice.call(el.childNodes).forEach(walk);
-    }
-
-    function processSection(el) {
-      if (el.dataset.linked) return;
-      el.dataset.linked = '1';
-      walk(el);
-    }
-
-    var content = document.getElementById('aueditable') || document.body;
-    var sections = Array.prototype.slice.call(content.children);
-
-    if (!sections.length) { walk(content); return; }
-
-    // Process sections as they approach the viewport (400px ahead)
-    // so links appear before the user actually reaches that text.
-    var observer = new IntersectionObserver(function(entries) {
-      entries.forEach(function(entry) {
-        if (entry.isIntersecting) {
-          processSection(entry.target);
-          observer.unobserve(entry.target);
-        }
-      });
-    }, { rootMargin: '0px 0px 400px 0px' });
-
-    sections.forEach(function(s) { observer.observe(s); });
-  } catch(err) { console.warn('autolink', err); }
-})();
-true;
-`;
-    webRef.current.injectJavaScript(script);
-  }, []);
-
   const handleLoadEnd = useCallback(() => {
     setWebReady(true);
     if (annotations.length > 0) injectAnnotations(annotations);
-    handleLinkInject();
-  }, [annotations, handleLinkInject]);
+  }, [annotations]);
 
   function injectAnnotations(anns: Annotation[]) {
     webRef.current?.injectJavaScript(

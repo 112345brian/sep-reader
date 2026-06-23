@@ -1,4 +1,5 @@
 import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache } from './db';
+import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 
 const BASE = 'https://plato.stanford.edu';
@@ -116,7 +117,7 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
       pub_date: extractMetaContent(html, 'citation_publication_date'),
       toc_html: tocHtml,
       preamble_html: preambleHtml,
-      content_html: contentHtml,
+      content_html: linkifyHtml(contentHtml),
     });
     // Index outgoing links for graph view
     indexLinks(slug, contentHtml).catch(() => {});

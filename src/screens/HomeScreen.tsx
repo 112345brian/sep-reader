@@ -462,7 +462,9 @@ export default function HomeScreen() {
                         onPress={() => open(item.slug, item.title)}
                         activeOpacity={0.5}
                       >
-                        <Text style={styles.browseRowText} numberOfLines={1}>{item.title}</Text>
+                        <Text style={styles.browseRowText} numberOfLines={1}>
+                          {item.title.charAt(0).toUpperCase() + item.title.slice(1)}
+                        </Text>
                         <IconChevron size={13} />
                       </TouchableOpacity>
                     )}
