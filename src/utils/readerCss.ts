@@ -131,16 +131,17 @@ export const READER_CSS = `
 
   h2 {
     font-family: var(--serif);
-    font-size: 1.35rem;
+    font-size: 1.125rem;
     font-weight: 600;
-    border-bottom: 1px solid var(--border);
-    padding: 2.25rem 0 0.5rem;
-    margin-bottom: 1rem;
+    border-top: 1px solid #222222;
+    padding-top: 1.75rem;
+    margin-top: 28px;
+    margin-bottom: 10px;
   }
 
   h3 {
     font-family: var(--sans);
-    font-size: 1rem;
+    font-size: 0.9375rem;
     font-weight: 600;
     padding-top: 1.5rem;
     margin-bottom: 0.5rem;
@@ -166,6 +167,9 @@ export const READER_CSS = `
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; text-decoration-color: var(--accent); }
   a:visited { color: var(--accent); }
+
+  /* Internal wiki-links (SEP cross-references) */
+  a.wl { border-bottom: 1px solid rgba(91,142,245,0.3); }
 
   /* External links */
   a[href^="http"]:not([href*="plato.stanford.edu"]) {
@@ -362,8 +366,7 @@ export const READER_CSS = `
     }
 
     h2 {
-      font-size: 1.2rem;
-      padding-top: 1.75rem;
+      font-size: 1.125rem;
     }
 
     table { font-size: 0.85rem; }

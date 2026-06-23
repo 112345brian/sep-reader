@@ -3,12 +3,12 @@ import {
   View, Text, StyleSheet, PanResponder, Animated,
   TouchableOpacity, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
-import Svg, { Line, Circle, G, Text as SvgText } from 'react-native-svg';
+import Svg, { Line, Circle, G, Text as SvgText, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { getGraphData } from '../services/db';
+import { getGraphData, getEntryPreview } from '../services/db';
 import type { GraphNode, GraphEdge } from '../services/db';
 import type { RootStackParamList } from '../../App';
 
@@ -96,16 +96,27 @@ function forceLayout(
   return layout;
 }
 
+function IconArrowUp({ color = '#9a9a9a' }: { color?: string }) {
+  return (
+    <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M12 19V5M5 12l7-7 7 7" />
+    </Svg>
+  );
+}
+
 export default function GraphScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
   const route = useRoute<Route>();
   const centerSlug = route.params?.centerSlug;
+  const centerTitle = (route.params as any)?.centerTitle as string | undefined;
   const { width, height } = useWindowDimensions();
 
   const [nodes, setNodes] = useState<LayoutNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<{ slug: string; title: string } | null>(null);
+  const [preview, setPreview] = useState<{ author: string | null; excerpt: string | null } | null>(null);
 
   const canvasH = height - insets.top - 44 - insets.bottom;
 
@@ -147,6 +158,15 @@ export default function GraphScreen() {
   const open = (slug: string, title: string) =>
     nav.push('Article', { slug, title });
 
+  // Tap a node → show a preview card first (excerpt loads lazily).
+  const selectNode = (slug: string, title: string) => {
+    setSelected({ slug, title });
+    setPreview(null);
+    getEntryPreview(slug).then(p => {
+      if (p) setPreview({ author: p.author, excerpt: p.excerpt });
+    });
+  };
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
@@ -155,21 +175,21 @@ export default function GraphScreen() {
           onPress={() => nav.goBack()}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <Text style={styles.backChevron}>‹</Text>
-          <Text style={styles.backLabel}>Back</Text>
+          <IconArrowUp color="#9a9a9a" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {centerSlug ? 'Connections' : 'Knowledge Graph'}
-        </Text>
-        <View style={styles.back}>
-          <Text style={styles.nodeCount}>{nodes.length > 0 ? `${nodes.length} articles` : ''}</Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerEyebrow}>GRAPH</Text>
+          {centerTitle ? (
+            <Text style={styles.headerTitle} numberOfLines={1}>{centerTitle}</Text>
+          ) : null}
         </View>
+        <View style={styles.back} />
       </View>
 
       <View style={[styles.canvas, { height: canvasH }]}>
         {loading ? (
           <View style={styles.loadingWrap}>
-            <ActivityIndicator color="#7ba4ff" />
+            <ActivityIndicator color="#5b8ef5" />
             <Text style={styles.loadingLabel}>Mapping connections…</Text>
           </View>
         ) : nodes.length === 0 ? (
@@ -202,15 +222,15 @@ export default function GraphScreen() {
               {nodes.map(node => {
                 const isCenter = node.slug === centerSlug;
                 const r = isCenter ? 11 : node.read ? 7 : 4;
-                const fill = isCenter ? '#7ba4ff' : node.read ? '#1e2a4a' : '#1a1a1a';
-                const stroke = isCenter ? '#7ba4ff' : node.read ? '#3a5a8a' : '#333';
+                const fill = isCenter ? '#5b8ef5' : node.read ? '#1e2a4a' : '#1a1a1a';
+                const stroke = isCenter ? '#5b8ef5' : node.read ? '#3a5a8a' : '#333';
                 const label = node.title.length > 22
                   ? node.title.slice(0, 20) + '…'
                   : node.title;
                 return (
                   <G
                     key={node.slug}
-                    onPress={() => open(node.slug, node.title)}
+                    onPress={() => selectNode(node.slug, node.title)}
                   >
                     <Circle
                       cx={node.x} cy={node.y}
@@ -230,7 +250,7 @@ export default function GraphScreen() {
                         y={node.y + r + 12}
                         textAnchor="middle"
                         fontSize={9}
-                        fill={isCenter ? '#7ba4ff' : '#555'}
+                        fill={isCenter ? '#5b8ef5' : '#555'}
                       >
                         {label}
                       </SvgText>
@@ -241,49 +261,81 @@ export default function GraphScreen() {
             </Svg>
           </Animated.View>
         )}
+        {/* ── Legend (bottom-left overlay) ── */}
+        <View style={[styles.legend, { bottom: insets.bottom + 12 }]}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: '#5b8ef5' }]} />
+            <Text style={styles.legendLabel}>Current</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: '#1e2a4a', borderWidth: 1, borderColor: '#3a5a8a' }]} />
+            <Text style={styles.legendLabel}>Read</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333' }]} />
+            <Text style={styles.legendLabel}>Linked</Text>
+          </View>
+        </View>
       </View>
 
-      <View style={[styles.legend, { paddingBottom: insets.bottom + 8 }]}>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#7ba4ff' }]} />
-          <Text style={styles.legendLabel}>Current</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#1e2a4a', borderWidth: 1, borderColor: '#3a5a8a' }]} />
-          <Text style={styles.legendLabel}>Read</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333' }]} />
-          <Text style={styles.legendLabel}>Linked</Text>
-        </View>
-        <Text style={styles.legendHint}>Tap to open · Drag to pan</Text>
-      </View>
+      {/* ── Node preview card ── */}
+      {selected && (
+        <>
+          <TouchableOpacity
+            style={styles.previewBackdrop}
+            activeOpacity={1}
+            onPress={() => { setSelected(null); setPreview(null); }}
+          />
+          <View style={[styles.previewCard, { bottom: insets.bottom + 64 }]}>
+            <Text style={styles.previewTitle} numberOfLines={2}>{selected.title}</Text>
+            {preview?.author ? (
+              <Text style={styles.previewAuthor} numberOfLines={1}>{preview.author}</Text>
+            ) : null}
+            {preview?.excerpt ? (
+              <Text style={styles.previewExcerpt} numberOfLines={3}>{preview.excerpt}</Text>
+            ) : (
+              <Text style={styles.previewExcerpt}>Not yet downloaded — open to read.</Text>
+            )}
+            <TouchableOpacity
+              style={styles.previewBtn}
+              onPress={() => { const s = selected; setSelected(null); setPreview(null); open(s.slug, s.title); }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.previewBtnText}>Open article →</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0d0d0d' },
+  root: { flex: 1, backgroundColor: '#111111' },
 
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     paddingBottom: 8,
     paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#2a2a2a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#222222',
     minHeight: 44,
-    backgroundColor: '#121212',
+    backgroundColor: '#111111',
   },
-  back: { flexDirection: 'row', alignItems: 'center', minWidth: 80, paddingHorizontal: 8 },
-  backChevron: { color: '#7ba4ff', fontSize: 28, lineHeight: 28, marginRight: 1 },
-  backLabel: { color: '#7ba4ff', fontSize: 16 },
+  back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  headerEyebrow: {
+    fontSize: 11, fontWeight: '500',
+    textTransform: 'uppercase', letterSpacing: 0.07 * 11,
+    color: '#555555',
+  },
   headerTitle: {
-    flex: 1, color: '#e8e8e8', fontSize: 15, fontWeight: '600', textAlign: 'center',
+    fontSize: 14, fontWeight: '600', color: '#e4e4e4', textAlign: 'center',
   },
-  nodeCount: { color: '#333', fontSize: 11, marginLeft: 'auto' },
 
-  canvas: { flex: 1, overflow: 'hidden' },
+  canvas: { flex: 1, overflow: 'hidden', position: 'relative' },
   canvasInner: { flex: 1 },
 
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
@@ -292,17 +344,47 @@ const styles = StyleSheet.create({
   emptyHint: { color: '#333', fontSize: 14, textAlign: 'center', paddingHorizontal: 40, lineHeight: 21 },
 
   legend: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    backgroundColor: '#121212',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#2a2a2a',
-    gap: 16,
+    position: 'absolute',
+    left: 16,
+    flexDirection: 'column',
+    gap: 6,
+    backgroundColor: 'rgba(17,17,17,0.82)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
-  legendLabel: { color: '#555', fontSize: 12 },
-  legendHint: { marginLeft: 'auto', color: '#2a2a2a', fontSize: 11 },
+  legendLabel: { color: '#555555', fontSize: 11 },
+
+  // Node preview card
+  previewBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
+  previewCard: {
+    position: 'absolute',
+    left: 16, right: 16,
+    backgroundColor: '#1c1c1c',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2e2e2e',
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  previewTitle: { color: '#e4e4e4', fontSize: 17, fontWeight: '700', lineHeight: 22 },
+  previewAuthor: { color: '#555', fontSize: 12, marginTop: 4 },
+  previewExcerpt: { color: '#9a9a9a', fontSize: 13, lineHeight: 19, marginTop: 8 },
+  previewBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: 'rgba(91,142,245,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(91,142,245,0.35)',
+  },
+  previewBtnText: { color: '#5b8ef5', fontSize: 14, fontWeight: '600' },
 });

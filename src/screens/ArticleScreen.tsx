@@ -4,6 +4,7 @@ import {
   TouchableOpacity, Share, Linking, Pressable,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import WebView from 'react-native-webview';
 import type { WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,7 +14,7 @@ import type { RouteProp } from '@react-navigation/native';
 import {
   getEntry, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
-  getMeta,
+  getMeta, setReadProgress, getLinksTo,
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
@@ -74,6 +75,14 @@ function IconDots({ color = '#9a9a9a' }: { color?: string }) {
       <Circle cx="12" cy="5" r="1.5" />
       <Circle cx="12" cy="12" r="1.5" />
       <Circle cx="12" cy="19" r="1.5" />
+    </Svg>
+  );
+}
+
+function IconMessage({ color = '#5b8ef5' }: { color?: string }) {
+  return (
+    <Svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </Svg>
   );
 }
@@ -167,9 +176,10 @@ export default function ArticleScreen() {
     setOrphanDismissed(false);
 
     await recordRead(slug, entry.title, fromSlug);
-    const [customCss, fontSizeStr] = await Promise.all([
+    const [customCss, fontSizeStr, backlinks] = await Promise.all([
       getMeta('custom_css'),
       getMeta('font_size'),
+      getLinksTo(slug),
     ]);
     const fontSize = fontSizeStr ? parseInt(fontSizeStr, 10) : undefined;
 
@@ -184,6 +194,7 @@ export default function ArticleScreen() {
         preambleHtml: entry.preamble_html ?? '',
         customCss: customCss ?? undefined,
         fontSize,
+        backlinkCount: backlinks.length,
       }),
     });
   }
@@ -202,7 +213,11 @@ export default function ArticleScreen() {
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
-      if (msg.type === 'highlight') {
+      if (msg.type === 'progress') {
+        if (typeof msg.value === 'number') setReadProgress(slug, msg.value).catch(() => {});
+      } else if (msg.type === 'backlinks') {
+        nav.navigate('Graph', { centerSlug: slug, centerTitle: title });
+      } else if (msg.type === 'highlight') {
         handleSaveAnnotation(msg.text, msg.context, msg.color, null);
       } else if (msg.type === 'annotate') {
         setPendingAnnotation({ selected_text: msg.text, context: msg.context, color: msg.color });
@@ -211,7 +226,7 @@ export default function ArticleScreen() {
         if (ann) setEditingAnnotation(ann);
       }
     } catch {}
-  }, [annotations]);
+  }, [annotations, slug, title, nav]);
 
   async function handleSaveAnnotation(
     text: string, context: string | null, color: string, note: string | null
@@ -296,6 +311,39 @@ export default function ArticleScreen() {
   const readMin = entry?.word_count ? Math.ceil(entry.word_count / 200) : null;
   const year = entry?.pub_date?.slice(0, 4) ?? null;
 
+  const openGraph = () =>
+    nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle });
+
+  // ── Gestures (non-overlapping zones so the WebView keeps its own scroll) ──
+
+  // Swipe RIGHT anywhere in the reading area → home. Cancels if the drag is
+  // vertical-first (failOffsetY), so normal article scrolling is untouched.
+  const swipeHome = Gesture.Pan()
+    .runOnJS(true)
+    .activeOffsetX([-9999, 30])      // only a rightward drag activates
+    .failOffsetY([-22, 22])          // a vertical drag hands control to the WebView
+    .onEnd(e => {
+      if (e.translationX > 80 && e.velocityX > 0) nav.goBack();
+    });
+
+  // Swipe DOWN on the header → graph view (mockup: "swipe down from top").
+  const swipeGraph = Gesture.Pan()
+    .runOnJS(true)
+    .activeOffsetY(18)
+    .onEnd(e => {
+      if (e.translationY > 50) openGraph();
+    });
+
+  // Bottom handle: tap OR swipe up → TOC sheet.
+  const tocTap = Gesture.Tap().runOnJS(true).onEnd(() => setShowToc(true));
+  const tocSwipe = Gesture.Pan()
+    .runOnJS(true)
+    .activeOffsetY(-12)
+    .onEnd(e => {
+      if (e.translationY < -25) setShowToc(true);
+    });
+  const tocGesture = Gesture.Exclusive(tocSwipe, tocTap);
+
   return (
     <View style={styles.root}>
       {/* ── App bar ── */}
@@ -304,7 +352,7 @@ export default function ArticleScreen() {
           <IconBack />
         </IBtn>
         <View style={{ flex: 1 }} />
-        <IBtn onPress={() => nav.goBack()}>
+        <IBtn onPress={() => { nav.popToTop(); }}>
           <IconSearch />
         </IBtn>
         <IBtn onPress={() => setShowOverflow(v => !v)}>
@@ -355,7 +403,8 @@ export default function ArticleScreen() {
 
       {state.phase === 'ready' && (
         <>
-          {/* ── Native article header ── */}
+          {/* ── Native article header (swipe down → graph) ── */}
+          <GestureDetector gesture={swipeGraph}>
           <View style={styles.articleHeader}>
             <Text style={styles.articleCategory}>STANFORD ENCYCLOPEDIA</Text>
             <Text style={styles.articleTitle}>{displayTitle}</Text>
@@ -380,11 +429,13 @@ export default function ArticleScreen() {
                   style={styles.annChip}
                   onPress={() => nav.navigate('Annotations')}
                 >
+                  <IconMessage />
                   <Text style={styles.annChipText}>{annCount} notes</Text>
                 </TouchableOpacity>
               )}
             </View>
           </View>
+          </GestureDetector>
 
           {/* ── Orphan banner ── */}
           {orphaned.length > 0 && !orphanDismissed && (
@@ -405,9 +456,9 @@ export default function ArticleScreen() {
             />
           )}
 
-          {/* ── WebView ── */}
+          {/* ── WebView (swipe right → home) ── */}
+          <GestureDetector gesture={swipeHome}>
           <View style={styles.webWrap}>
-            {/* Left edge accent — pointer-events none so WebView gets touches */}
             <View style={styles.edgeAccent} pointerEvents="none" />
             {!webReady && (
               <View style={styles.webOverlay}>
@@ -430,16 +481,14 @@ export default function ArticleScreen() {
               textZoom={100}
               androidLayerType="hardware"
             />
+            {/* Swipe-up / tap TOC handle — floating inside webWrap (mockup: absolute bottom:0) */}
+            <GestureDetector gesture={tocGesture}>
+              <View style={styles.tocHandle}>
+                <View style={styles.tocHandlePill} />
+              </View>
+            </GestureDetector>
           </View>
-
-          {/* Swipe-up TOC handle — sits OUTSIDE webWrap so it receives native touches */}
-          <TouchableOpacity
-            style={styles.tocHandle}
-            onPress={() => setShowToc(true)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.tocHandlePill} />
-          </TouchableOpacity>
+          </GestureDetector>
 
           {/* ── TOC Sheet ── */}
           {showToc && (
@@ -474,10 +523,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 4,
-    height: undefined,
     paddingBottom: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#1e1e1e',
+    borderBottomWidth: 1,
+    borderBottomColor: '#222222',
   },
   iBtn: {
     width: 42, height: 42,
@@ -512,10 +560,10 @@ const styles = StyleSheet.create({
 
   articleHeader: {
     paddingHorizontal: 18,
-    paddingTop: 16,
-    paddingBottom: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#1e1e1e',
+    paddingTop: 22,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222222',
   },
   articleCategory: {
     fontSize: 11, fontWeight: '600',
@@ -525,10 +573,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   articleTitle: {
-    fontSize: 24, fontWeight: '700',
-    lineHeight: 30, letterSpacing: -0.02 * 24,
+    fontSize: 26, fontWeight: '700',
+    lineHeight: 31, letterSpacing: -0.02 * 26,
     color: '#e4e4e4',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   articleMeta: {
     flexDirection: 'row',
@@ -542,6 +590,7 @@ const styles = StyleSheet.create({
     marginLeft: 'auto' as any,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
     paddingHorizontal: 9,
     paddingVertical: 3,
     borderRadius: 12,
@@ -556,9 +605,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0, top: 0, bottom: 0,
     width: 3,
-    backgroundColor: 'rgba(91,142,245,0.35)',
+    backgroundColor: 'rgba(91,142,245,0.25)',
     zIndex: 5,
-    pointerEvents: 'none',
   } as any,
   web: { flex: 1, backgroundColor: '#111' },
   webOverlay: {
@@ -567,17 +615,21 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', zIndex: 10,
   },
 
+  // mock: position:absolute, bottom:0, left:0, right:0, height:44px
+  // gradient from rgba(17,17,17,.95) to transparent, pill at bottom
   tocHandle: {
-    height: 36,
+    position: 'absolute',
+    bottom: 0, left: 0, right: 0,
+    height: 44,
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#111',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#1e1e1e',
+    justifyContent: 'flex-end',
+    paddingBottom: 10,
+    backgroundColor: 'rgba(17,17,17,0.88)',
+    zIndex: 6,
   },
   tocHandlePill: {
     width: 40, height: 4,
-    backgroundColor: '#333',
+    backgroundColor: '#555',
     borderRadius: 2,
   },
 

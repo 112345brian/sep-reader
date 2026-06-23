@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
     gap: 14,
     paddingHorizontal: 16,
     paddingVertical: 13,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 1,
     borderBottomColor: C.borderSubtle,
   },
   pageRowIcon: {
@@ -330,7 +330,7 @@ const styles = StyleSheet.create({
   pageRowBody: { flex: 1, minWidth: 0 },
   pageRowTitle: { fontSize: 14, fontWeight: '500', color: C.text, lineHeight: 18 },
   pageRowMeta: { fontSize: 12, color: C.textHint, marginTop: 2 },
-  pageRowExcerpt: { fontSize: 12, color: '#7a7a7a', marginTop: 3, lineHeight: 17 },
+  pageRowExcerpt: { fontSize: 12, color: C.textHint, marginTop: 3, lineHeight: 17 },
   pageRowChev: { alignSelf: 'center' },
 
   // mock: width:100%;height:2px;background:#2a2a2a;border-radius:1px;margin-top:7px
