@@ -557,6 +557,34 @@ export const SEP_JS = `
         hideFootnoteTimeout = setTimeout(() => footnotePopup.classList.remove('visible'), 200);
     });
 
+    // Mobile tap handler — posts footnote content to React Native
+    document.addEventListener('click', function(e) {
+        const link = e.target.closest('sup a[href^="#"], a[href^="#note-"], a[href^="#fn"]');
+        if (!link) return;
+        const href = link.getAttribute('href') || '';
+        if (!href.startsWith('#')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const id = href.slice(1);
+        const target = document.getElementById(id);
+        if (!target) return;
+        // Clone and strip back-reference anchors
+        const clone = target.cloneNode(true);
+        const backs = clone.querySelectorAll('a[href^="#footnote-ref"], a[href^="#ref"], .fn-back, a[title]');
+        backs.forEach(function(el) { el.remove(); });
+        const text = (clone.textContent || '').trim().replace(/^\d+[\.\s]+/, '').trim();
+        if (text.length < 3) return;
+        if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'footnote', text: text }));
+        }
+    }, true);
+
+    // Strip [n] brackets from in-text footnote superscripts
+    document.querySelectorAll('sup > a').forEach(function(a) {
+        const t = a.textContent || '';
+        if (/^\[\d+\]$/.test(t.trim())) a.textContent = t.trim().slice(1, -1);
+    });
+
 
     // =============================================
     // 6. SECTION ANCHOR LINKS (click to copy)

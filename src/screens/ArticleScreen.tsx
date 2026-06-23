@@ -138,6 +138,7 @@ export default function ArticleScreen() {
   const [orphanDismissed, setOrphanDismissed] = useState(false);
   const [showToc, setShowToc] = useState(false);
   const [showOverflow, setShowOverflow] = useState(false);
+  const [footnote, setFootnote] = useState<{ text: string } | null>(null);
 
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
@@ -183,11 +184,12 @@ export default function ArticleScreen() {
     setOrphanDismissed(false);
 
     await recordRead(slug, entry.title, fromSlug);
+    // indexLinks is fire-and-forget — don't block article render
+    indexLinks(slug, entry.content_html ?? '').catch(() => {});
     const [customCss, fontSizeStr, backlinks] = await Promise.all([
       getMeta('custom_css'),
       getMeta('font_size'),
       getLinksTo(slug),
-      indexLinks(slug, entry.content_html ?? ''),
     ]);
     const fontSize = fontSizeStr ? parseInt(fontSizeStr, 10) : undefined;
 
@@ -232,6 +234,8 @@ export default function ArticleScreen() {
       } else if (msg.type === 'tap_annotation') {
         const ann = annotations.find(a => a.id === msg.id);
         if (ann) setEditingAnnotation(ann);
+      } else if (msg.type === 'footnote') {
+        if (msg.text) setFootnote({ text: msg.text });
       }
     } catch {}
   }, [annotations, slug, title, nav]);
@@ -283,6 +287,7 @@ export default function ArticleScreen() {
       return false;
     }
 
+    // Pure anchor navigation stays within the WebView; JS intercepts footnote taps first
     if (url.includes('#') && !url.startsWith('http')) return true;
 
     if (url.startsWith('http')) {
@@ -486,6 +491,17 @@ export default function ArticleScreen() {
         </>
       )}
 
+      {/* ── Footnote popup ── */}
+      {footnote && (
+        <Pressable style={styles.fnScrim} onPress={() => setFootnote(null)}>
+          <View style={[styles.fnSheet, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.fnHandle} />
+            <Text style={styles.fnLabel}>NOTE</Text>
+            <Text style={styles.fnText}>{footnote.text}</Text>
+          </View>
+        </Pressable>
+      )}
+
       <AnnotationModal
         annotation={modalAnnotation}
         onSave={handleModalSave}
@@ -611,6 +627,40 @@ const styles = StyleSheet.create({
     width: 40, height: 4,
     backgroundColor: '#555',
     borderRadius: 2,
+  },
+
+  fnScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+    zIndex: 50,
+  },
+  fnSheet: {
+    backgroundColor: '#1c1c1c',
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    maxHeight: '55%',
+  },
+  fnHandle: {
+    width: 36, height: 4,
+    borderRadius: 2,
+    backgroundColor: '#2e2e2e',
+    alignSelf: 'center',
+    marginBottom: 14,
+  },
+  fnLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.9,
+    color: '#555',
+    marginBottom: 8,
+  },
+  fnText: {
+    fontSize: 14,
+    color: '#c0c0c0',
+    lineHeight: 22,
   },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },

@@ -74,9 +74,13 @@ interface ArticleGroup {
   items: AnnotationWithTitle[];
 }
 
+type BrowseSectionItem =
+  | { kind: 'entry'; slug: string; title: string }
+  | { kind: 'parent'; label: string; slug: string | null; children: { slug: string; subTitle: string }[] };
+
 interface BrowseSection {
   title: string; // the letter
-  data: { slug: string; title: string }[];
+  data: BrowseSectionItem[];
 }
 
 // ── AlphabetScrubber ───────────────────────────────────────────────────────
@@ -91,6 +95,7 @@ function AlphabetScrubber({
   const [active, setActive] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const containerRef = useRef<View>(null);
+  // Populated via onLayout so it's always ready before first touch
   const metricsRef = useRef({ top: 0, height: 0 });
   const activeRef = useRef<string | null>(null);
   const onSelectRef = useRef(onSelect);
@@ -98,10 +103,20 @@ function AlphabetScrubber({
   const lettersRef = useRef(letters);
   lettersRef.current = letters;
 
-  function pickLetter(pageY: number, top: number, height: number): string {
+  function pickLetter(pageY: number): string {
+    const { top, height } = metricsRef.current;
+    if (height === 0) return '';
     const rel = Math.max(0, Math.min(0.9999, (pageY - top) / height));
     const idx = Math.floor(rel * lettersRef.current.length);
-    return lettersRef.current[idx] ?? lettersRef.current[lettersRef.current.length - 1];
+    return lettersRef.current[idx] ?? lettersRef.current[lettersRef.current.length - 1] ?? '';
+  }
+
+  function applyLetter(pageY: number) {
+    const letter = pickLetter(pageY);
+    if (!letter || letter === activeRef.current) return;
+    activeRef.current = letter;
+    setActive(letter);
+    onSelectRef.current(letter);
   }
 
   const panResponder = useRef(
@@ -109,24 +124,11 @@ function AlphabetScrubber({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: evt => {
-        containerRef.current?.measure((_x, _y, _w, h, _px, py) => {
-          metricsRef.current = { top: py, height: h };
-          const letter = pickLetter(evt.nativeEvent.pageY, py, h);
-          activeRef.current = letter;
-          setExpanded(true);
-          setActive(letter);
-          onSelectRef.current(letter);
-        });
+        setExpanded(true);
+        applyLetter(evt.nativeEvent.pageY);
       },
       onPanResponderMove: evt => {
-        const { top, height } = metricsRef.current;
-        if (height === 0) return;
-        const letter = pickLetter(evt.nativeEvent.pageY, top, height);
-        if (letter !== activeRef.current) {
-          activeRef.current = letter;
-          setActive(letter);
-          onSelectRef.current(letter);
-        }
+        applyLetter(evt.nativeEvent.pageY);
       },
       onPanResponderRelease: () => {
         setExpanded(false);
@@ -141,9 +143,16 @@ function AlphabetScrubber({
     })
   ).current;
 
+  const onLayout = () => {
+    containerRef.current?.measure((_x, _y, _w, h, _px, py) => {
+      metricsRef.current = { top: py, height: h };
+    });
+  };
+
   return (
     <View
       ref={containerRef}
+      onLayout={onLayout}
       style={[styles.scrubber, expanded && styles.scrubberExpanded]}
       {...panResponder.panHandlers}
     >
@@ -181,10 +190,11 @@ export default function HomeScreen() {
 
   const [browseEntries, setBrowseEntries] = useState<{ slug: string; title: string }[]>([]);
   const [browseLoaded, setBrowseLoaded]   = useState(false);
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   const searchInputRef = useRef<TextInput>(null);
   const debounce       = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sectionListRef = useRef<SectionList<{ slug: string; title: string }>>(null);
+  const sectionListRef = useRef<SectionList<BrowseSectionItem>>(null);
 
   const loadData = useCallback(async () => {
     const [h, b, anns] = await Promise.all([
@@ -277,17 +287,77 @@ export default function HomeScreen() {
     return Array.from(map.values());
   }, [annotations]);
 
+  const toggleParent = useCallback((label: string) => {
+    setExpandedParents(prev => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label); else next.add(label);
+      return next;
+    });
+  }, []);
+
   const browseSections = useMemo<BrowseSection[]>(() => {
-    const groups: Record<string, { slug: string; title: string }[]> = {};
-    for (const e of browseEntries) {
-      const letter = e.title[0]?.toUpperCase() ?? '#';
-      if (!groups[letter]) groups[letter] = [];
-      groups[letter].push(e);
+    // Filter out "see X" redirect entries — they're not real articles
+    const filtered = browseEntries.filter(e => !e.title.includes(' — see ') && !e.title.includes('— see '));
+
+    // Group sub-entries (title contains ": ") by parent label.
+    // Only group if the part before ": " is a clean label (no em dash = not a redirect).
+    const parentMap = new Map<string, { slug: string | null; children: { slug: string; subTitle: string }[] }>();
+    const standaloneKeys = new Set<string>(); // slugs that are standalone parents
+
+    for (const e of filtered) {
+      const colonIdx = e.title.indexOf(': ');
+      if (colonIdx > 0) {
+        const label = e.title.slice(0, colonIdx);
+        if (label.includes(' — ') || label.includes(' - ')) continue; // skip mis-grouped redirects
+        const subTitle = e.title.slice(colonIdx + 2);
+        if (!parentMap.has(label)) parentMap.set(label, { slug: null, children: [] });
+        parentMap.get(label)!.children.push({ slug: e.slug, subTitle });
+      }
     }
-    return Object.keys(groups).sort().map(letter => ({
-      title: letter,
-      data: groups[letter],
-    }));
+    // Mark standalone entries that share a name with a parent label
+    for (const e of filtered) {
+      if (e.title.indexOf(': ') < 0) {
+        if (parentMap.has(e.title)) {
+          parentMap.get(e.title)!.slug = e.slug;
+          standaloneKeys.add(e.slug);
+        }
+      }
+    }
+
+    // Build sections
+    const groups: Record<string, BrowseSectionItem[]> = {};
+    const addedParentLabels = new Set<string>();
+
+    for (const e of filtered) {
+      const colonIdx = e.title.indexOf(': ');
+      if (colonIdx > 0) {
+        const label = e.title.slice(0, colonIdx);
+        if (label.includes(' — ') || label.includes(' - ')) {
+          // Mis-grouped redirect — render as standalone
+          const first = e.title[0] ?? '';
+          const letter = /[0-9]/.test(first) ? '#' : first.toUpperCase();
+          if (!groups[letter]) groups[letter] = [];
+          groups[letter].push({ kind: 'entry', slug: e.slug, title: e.title });
+          continue;
+        }
+        if (addedParentLabels.has(label)) continue;
+        addedParentLabels.add(label);
+        const info = parentMap.get(label)!;
+        const first = label[0] ?? '';
+        const letter = /[0-9]/.test(first) ? '#' : first.toUpperCase();
+        if (!groups[letter]) groups[letter] = [];
+        groups[letter].push({ kind: 'parent', label, slug: info.slug, children: info.children });
+      } else if (!standaloneKeys.has(e.slug)) {
+        const first = e.title[0] ?? '';
+        const letter = /[0-9]/.test(first) ? '#' : first.toUpperCase();
+        if (!groups[letter]) groups[letter] = [];
+        groups[letter].push({ kind: 'entry', slug: e.slug, title: e.title });
+      }
+    }
+
+    return Object.keys(groups)
+      .sort((a, b) => (a === '#' ? -1 : b === '#' ? 1 : a.localeCompare(b)))
+      .map(letter => ({ title: letter, data: groups[letter] }));
   }, [browseEntries]);
 
   const browseLetters = useMemo(() => browseSections.map(s => s.title), [browseSections]);
@@ -444,10 +514,10 @@ export default function HomeScreen() {
                 <ActivityIndicator color={C.accent} style={{ marginTop: 64 }} />
               ) : (
                 <>
-                  <SectionList
+                  <SectionList<BrowseSectionItem>
                     ref={sectionListRef}
                     sections={browseSections}
-                    keyExtractor={item => item.slug}
+                    keyExtractor={item => item.kind === 'parent' ? `parent-${item.label}` : item.slug}
                     contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingLeft: 32 }}
                     stickySectionHeadersEnabled
                     onScrollToIndexFailed={() => {}}
@@ -456,18 +526,53 @@ export default function HomeScreen() {
                         <Text style={styles.browseHeaderText}>{section.title}</Text>
                       </View>
                     )}
-                    renderItem={({ item }) => (
-                      <TouchableOpacity
-                        style={styles.browseRow}
-                        onPress={() => open(item.slug, item.title)}
-                        activeOpacity={0.5}
-                      >
-                        <Text style={styles.browseRowText} numberOfLines={1}>
-                          {item.title.charAt(0).toUpperCase() + item.title.slice(1)}
-                        </Text>
-                        <IconChevron size={13} />
-                      </TouchableOpacity>
-                    )}
+                    renderItem={({ item }) => {
+                      if (item.kind === 'parent') {
+                        const isExpanded = expandedParents.has(item.label);
+                        return (
+                          <View>
+                            <View style={styles.browseRow}>
+                              <TouchableOpacity
+                                style={{ flex: 1 }}
+                                onPress={() => item.slug ? open(item.slug, item.label) : toggleParent(item.label)}
+                                activeOpacity={0.5}
+                              >
+                                <Text style={styles.browseRowText} numberOfLines={1}>{item.label}</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                onPress={() => toggleParent(item.label)}
+                              >
+                                <View style={{ transform: [{ rotate: isExpanded ? '90deg' : '0deg' }] }}>
+                                  <IconChevron size={13} />
+                                </View>
+                              </TouchableOpacity>
+                            </View>
+                            {isExpanded && item.children.map(child => (
+                              <TouchableOpacity
+                                key={child.slug}
+                                style={styles.browseSubRow}
+                                onPress={() => open(child.slug, `${item.label}: ${child.subTitle}`)}
+                                activeOpacity={0.5}
+                              >
+                                <Text style={styles.browseSubRowText} numberOfLines={1}>{child.subTitle}</Text>
+                                <IconChevron size={11} />
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        );
+                      }
+                      return (
+                        <TouchableOpacity
+                          style={styles.browseRow}
+                          onPress={() => open(item.slug, item.title)}
+                          activeOpacity={0.5}
+                        >
+                          <Text style={styles.browseRowText} numberOfLines={1}>{item.title}</Text>
+                          <IconChevron size={13} />
+                        </TouchableOpacity>
+                      );
+                    }}
                   />
                   <AlphabetScrubber letters={browseLetters} onSelect={handleAlphaSelect} />
                 </>
@@ -717,6 +822,21 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: C.text,
+  },
+  browseSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 28,
+    paddingRight: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderSubtle,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  browseSubRowText: {
+    flex: 1,
+    fontSize: 13,
+    color: C.textHint,
   },
 
   // Alphabet scrubber

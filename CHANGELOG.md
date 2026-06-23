@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.0] — 2026-06-23
+
+### Added
+- **Footnote tap → native bottom sheet** — tapping a footnote superscript now shows the citation text in a native bottom-sheet overlay instead of navigating or doing nothing. The previous handler used `mouseover` + `canShowHoverPreview()`, which always returns false on touch devices.
+- Footnote reference numbers stripped of `[]` brackets (`[1]` → `1`); tap target enlarged with minimum 20×22pt hit area
+- **Browse: collapsible sub-entry groups** — entries with a parent label (e.g. "Descartes, René: epistemology") are now grouped under an expandable parent row with a chevron. Collapsed view shows 1,275 rows instead of 1,838 flat entries. 19 redirect entries ("Averroes — see Ibn Rushd") filtered out.
+- `scripts/buildEntrySeed.js` — permanent seed generator with full HTML entity decoding; replaces the previous one-off script that was dropping accented characters (`Descartes, Ren` → `Descartes, René`, `Gdel` → `Gödel`, etc.)
+
+### Fixed
+- **TOC gesture took 10+ seconds to open** — `indexLinks` was the 4th item in a `Promise.all` inside `ArticleScreen.load()`, blocking `setState` until the full link-indexing DB transaction finished. Moved to fire-and-forget; article now renders as soon as CSS and backlinks resolve.
+- Intro section (`#preamble`) rendered at `0.88rem` — smaller than body text. Now inherits body font size.
+- `fetchEntryList` in `catalog.ts` still used the old simple regex; updated with two-pass parent-group parsing and full entity decoding to match the seed generator.
+
+### Changed
+- **Typography overhaul:**
+  - Font size: 16px → 17px
+  - Side padding: 18px desktop / 16px mobile → 20px unified
+  - Paragraph spacing: `margin-bottom: 1.1em` → `1.6em` (nearly doubles the breathing room between paragraphs)
+  - Line height: 1.78 → 1.80
+  - `h2` font size: 1.125rem → 1.3rem; bottom margin increased
+  - `h3` font size: 0.9375rem → 1.05rem (was smaller than body text — confusing hierarchy)
+  - List item spacing: 0.2em → 0.35em; list bottom margin matches paragraph spacing
+  - Blockquote margin increased proportionally
+
 ## [0.2.0] — 2026-06-22
 
 ### Changed

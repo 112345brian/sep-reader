@@ -132,16 +132,47 @@ async function fetchEntryList(): Promise<{ slug: string; title: string }[]> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
 
-  const seen = new Set<string>();
   const entries: { slug: string; title: string }[] = [];
-  const re = /href="entries\/([a-z0-9-]+)\/"><strong>([^<]+)<\/strong>/g;
+  const seen = new Set<string>();
+  const STRONG_LINK = /href="entries\/([a-z0-9-]+)\/"><strong>([^<]+)<\/strong>/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
+
+  // Pass 1: parent groups — <li> HEADER \n <ul> sub-entries </ul>
+  // Header may be plain text OR a linked entry
+  const parentGroupRe = /<li>\s*([^\n]+)\n\s*<ul>([\s\S]*?)<\/ul>/g;
+  while ((m = parentGroupRe.exec(html)) !== null) {
+    const header = m[1].trim();
+    const subHtml = m[2];
+    const strongM = header.match(/<strong>([^<]+)<\/strong>/);
+    const parentLabel = decodeEntities(strongM ? strongM[1].trim() : header.replace(/<[^>]*>/g, '').trim());
+    if (!parentLabel) continue;
+    // If header is a linked entry, add the parent itself
+    const parentLink = header.match(/href="entries\/([a-z0-9-]+)\/"/);
+    if (parentLink && !seen.has(parentLink[1])) {
+      seen.add(parentLink[1]);
+      entries.push({ slug: parentLink[1], title: parentLabel });
+    }
+    // Add sub-entries prefixed with parent label
+    const subRe = /href="entries\/([a-z0-9-]+)\/"><strong>([^<]+)<\/strong>/g;
+    let sub: RegExpExecArray | null;
+    while ((sub = subRe.exec(subHtml)) !== null) {
+      const slug = sub[1];
+      if (seen.has(slug)) continue;
+      seen.add(slug);
+      entries.push({ slug, title: `${parentLabel}: ${decodeEntities(sub[2].trim())}` });
+    }
+  }
+
+  // Pass 2: standalone entries not already captured
+  STRONG_LINK.lastIndex = 0;
+  while ((m = STRONG_LINK.exec(html)) !== null) {
     const slug = m[1];
     if (seen.has(slug)) continue;
     seen.add(slug);
     entries.push({ slug, title: decodeEntities(m[2].trim()) });
   }
+
+  entries.sort((a, b) => a.title.localeCompare(b.title));
   return entries;
 }
 
@@ -184,8 +215,27 @@ function extractAuthor(html: string): string | null {
   return m ? decodeEntities(m[1].trim()).slice(0, 200) : null;
 }
 
+const ENTITY_MAP: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  eacute: 'é', egrave: 'è', ecirc: 'ê', euml: 'ë',
+  aacute: 'á', agrave: 'à', acirc: 'â', auml: 'ä', aring: 'å', aelig: 'æ',
+  oacute: 'ó', ograve: 'ò', ocirc: 'ô', ouml: 'ö', oslash: 'ø',
+  uacute: 'ú', ugrave: 'ù', ucirc: 'û', uuml: 'ü',
+  iacute: 'í', igrave: 'ì', icirc: 'î', iuml: 'ï',
+  ntilde: 'ñ', ccedil: 'ç', szlig: 'ß', yacute: 'ý',
+  Eacute: 'É', Egrave: 'È', Ecirc: 'Ê', Euml: 'Ë',
+  Aacute: 'Á', Agrave: 'À', Acirc: 'Â', Auml: 'Ä', Aring: 'Å', AElig: 'Æ',
+  Oacute: 'Ó', Ograve: 'Ò', Ocirc: 'Ô', Ouml: 'Ö', Oslash: 'Ø',
+  Uacute: 'Ú', Ugrave: 'Ù', Ucirc: 'Û', Uuml: 'Ü',
+  Iacute: 'Í', Igrave: 'Ì', Icirc: 'Î', Iuml: 'Ï',
+  Ntilde: 'Ñ', Ccedil: 'Ç', Yacute: 'Ý',
+  mdash: '—', ndash: '–', lsquo: '‘', rsquo: '’',
+  ldquo: '“', rdquo: '”', hellip: '…', middot: '·',
+};
+
 function decodeEntities(s: string): string {
   return s
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, ' ');
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&([a-zA-Z]+);/g, (m, name) => ENTITY_MAP[name] ?? m);
 }

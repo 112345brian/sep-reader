@@ -17,9 +17,9 @@ export const READER_CSS = `
     --serif:       Georgia, 'Times New Roman', serif;
     --sans:        -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     --toc-width:   260px;
-    --side-pad:    18px;
+    --side-pad:    20px;
     --max-width:   680px;
-    --font-size:   16px;
+    --font-size:   17px;
   }
 
   /* ── Reset ─────────────────────────────────────────── */
@@ -40,7 +40,7 @@ export const READER_CSS = `
     background: var(--bg);
     color: var(--text);
     font-family: var(--sans);
-    line-height: 1.78;
+    line-height: 1.8;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -131,20 +131,21 @@ export const READER_CSS = `
 
   h2 {
     font-family: var(--serif);
-    font-size: 1.125rem;
+    font-size: 1.3rem;
     font-weight: 600;
-    border-top: 1px solid #222222;
+    border-top: 1px solid #252525;
     padding-top: 1.75rem;
-    margin-top: 28px;
-    margin-bottom: 10px;
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
   }
 
   h3 {
     font-family: var(--sans);
-    font-size: 0.9375rem;
+    font-size: 1.05rem;
     font-weight: 600;
+    letter-spacing: -0.01em;
     padding-top: 1.5rem;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.6rem;
   }
 
   h4, h5, h6 {
@@ -152,11 +153,11 @@ export const READER_CSS = `
     font-size: 0.95rem;
     font-weight: 600;
     padding-top: 1rem;
-    margin-bottom: 0.35rem;
+    margin-bottom: 0.5rem;
   }
 
   p {
-    margin: 0 0 1.1em;
+    margin: 0 0 1.6em;
     color: var(--text);
   }
 
@@ -198,12 +199,12 @@ export const READER_CSS = `
 
   /* ── Lists ──────────────────────────────────────────── */
   ul, ol {
-    margin: 0 0 1.1em;
+    margin: 0 0 1.6em;
     padding-left: 1.75rem;
   }
 
-  li { margin: 0.2em 0; }
-  li > ul, li > ol { margin-bottom: 0; }
+  li { margin: 0.35em 0; }
+  li > ul, li > ol { margin-top: 0.35em; margin-bottom: 0; }
 
   /* ── Bibliography ────────────────────────────────────── */
   #bibliography-section ol,
@@ -229,8 +230,8 @@ export const READER_CSS = `
 
   /* ── Blockquotes ─────────────────────────────────────── */
   blockquote {
-    margin: 1.25rem 0;
-    padding: 0.75rem 1rem 0.75rem 1.25rem;
+    margin: 1.75rem 0;
+    padding: 1rem 1.1rem 1rem 1.4rem;
     border-left: 3px solid var(--border-mid);
     background: var(--bg-raised);
     border-radius: 0 6px 6px 0;
@@ -278,12 +279,18 @@ export const READER_CSS = `
     line-height: 1.65;
   }
 
-  sup a, a[href^="#fn"], a[href^="#footnote"] {
+  sup a, a[href^="#fn"], a[href^="#footnote"], a[href^="#note-"] {
     color: var(--accent);
     font-size: 0.75em;
     vertical-align: super;
     text-decoration: none;
     margin-left: 1px;
+    /* Bigger touch target */
+    display: inline-block;
+    min-width: 20px;
+    min-height: 22px;
+    padding: 0 3px;
+    text-align: center;
   }
 
   /* ── Preamble (author, publication date) ────────────── */
@@ -291,7 +298,6 @@ export const READER_CSS = `
     padding-top: 0.5rem;
     padding-bottom: 0.5rem;
     font-family: var(--sans);
-    font-size: 0.88rem;
     color: var(--text-muted);
     border-bottom: 1px solid var(--border);
     margin-bottom: 1.5rem;
@@ -358,7 +364,7 @@ export const READER_CSS = `
   /* ── Mobile (no font-size override — 16px is locked per ART-09) ─────────── */
   @media (max-width: 768px) {
     :root {
-      --side-pad: 16px;
+      --side-pad: 20px;
     }
 
     #toc {
