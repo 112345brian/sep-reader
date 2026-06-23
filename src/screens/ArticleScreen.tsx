@@ -215,10 +215,12 @@ export default function ArticleScreen() {
   try {
     var E = ${payload};
     if (!E.length) return;
+    // linked + map + re are shared across all observer callbacks for the whole article
     var linked = Object.create(null);
     var map = Object.create(null);
     for (var i = 0; i < E.length; i++) { map[E[i].t.toLowerCase()] = E[i].s; }
     var re = new RegExp('(?:' + E.map(function(e){return e.p;}).join('|') + ')', 'gi');
+
     function processText(node) {
       var text = node.textContent; re.lastIndex = 0;
       var mx = [], m;
@@ -243,6 +245,7 @@ export default function ArticleScreen() {
       if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
       node.parentNode && node.parentNode.replaceChild(frag, node);
     }
+
     var SKIP = {A:1,SCRIPT:1,STYLE:1,CODE:1,PRE:1,H1:1,H2:1,H3:1,CITE:1};
     function walk(el) {
       if (!el) return;
@@ -250,7 +253,30 @@ export default function ArticleScreen() {
       if (el.nodeType !== 1 || SKIP[el.tagName]) return;
       Array.prototype.slice.call(el.childNodes).forEach(walk);
     }
-    walk(document.getElementById('aueditable') || document.body);
+
+    function processSection(el) {
+      if (el.dataset.linked) return;
+      el.dataset.linked = '1';
+      walk(el);
+    }
+
+    var content = document.getElementById('aueditable') || document.body;
+    var sections = Array.prototype.slice.call(content.children);
+
+    if (!sections.length) { walk(content); return; }
+
+    // Process sections as they approach the viewport (400px ahead)
+    // so links appear before the user actually reaches that text.
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          processSection(entry.target);
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { rootMargin: '0px 0px 400px 0px' });
+
+    sections.forEach(function(s) { observer.observe(s); });
   } catch(err) { console.warn('autolink', err); }
 })();
 true;
