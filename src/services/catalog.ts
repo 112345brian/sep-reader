@@ -18,6 +18,7 @@ export async function refreshIndexIfStale(): Promise<void> {
   if (!isStale) return;
 
   const entries = await fetchEntryList();
+  console.log('[catalog] fetchEntryList returned', entries.length, 'entries');
   if (entries.length > 0) {
     await upsertIndexEntries(entries);
     await setMeta('index_refreshed_at', String(Date.now()));
@@ -81,7 +82,9 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
 }
 
 async function fetchEntryList(): Promise<{ slug: string; title: string }[]> {
+  console.log('[catalog] fetching', `${BASE}/contents.html`);
   const res = await fetch(`${BASE}/contents.html`, { headers: SEP_HEADERS });
+  console.log('[catalog] response status', res.status);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
 

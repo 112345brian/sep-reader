@@ -63,6 +63,7 @@ export default function App() {
   }
 
   const [phase, setPhase] = useState<AppPhase>('booting');
+  const [indexError, setIndexError] = useState<string>('');
   const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
   const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
@@ -88,8 +89,11 @@ export default function App() {
       try {
         await refreshIndexIfStale();
         const newCount = await getEntryCount();
-        if (newCount === 0) { setPhase('index_error'); return; }
-      } catch {
+        if (newCount === 0) { setIndexError('Fetched ok but 0 entries parsed'); setPhase('index_error'); return; }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error('[boot] index error:', msg);
+        setIndexError(msg);
         setPhase('index_error');
         return;
       }
@@ -154,7 +158,7 @@ export default function App() {
     return (
       <View style={styles.boot}>
         <Text style={styles.bootLogo}>Nous</Text>
-        <Text style={styles.bootError}>Could not reach plato.stanford.edu.{'\n'}Check your connection and relaunch.</Text>
+        <Text style={styles.bootError}>Could not reach plato.stanford.edu.{'\n'}Check your connection and relaunch.{indexError ? `\n\n${indexError}` : ''}</Text>
       </View>
     );
   }
