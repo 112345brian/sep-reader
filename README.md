@@ -1,6 +1,6 @@
 # Nous
 
-A native Android reader for the [Stanford Encyclopedia of Philosophy](https://plato.stanford.edu) and [The OWL](https://www.inphoproject.org). Built with React Native 0.81.
+A native reader for the [Stanford Encyclopedia of Philosophy](https://plato.stanford.edu) and [The OWL](https://www.inphoproject.org). Runs on Android and macOS. Built with React Native 0.81 and react-native-macos.
 
 ## Features
 
@@ -20,6 +20,7 @@ A native Android reader for the [Stanford Encyclopedia of Philosophy](https://pl
 | Layer | Choice |
 |---|---|
 | Framework | React Native 0.81.6 |
+| macOS | react-native-macos 0.81.7 |
 | Build | EAS Build (cloud — no Android Studio needed) |
 | Storage | expo-sqlite v16, FTS5, WAL |
 | Navigation | React Navigation v7 native stack |
@@ -35,6 +36,13 @@ A native Android reader for the [Stanford Encyclopedia of Philosophy](https://pl
 npm install -g eas-cli
 eas login
 eas build --platform android --profile preview
+```
+
+### macOS (requires Xcode)
+
+```bash
+cd macos && pod install && cd ..
+npx react-native run-macos
 ```
 
 ### Local development
