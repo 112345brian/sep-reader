@@ -87,6 +87,9 @@ export async function updateDownloadNotification(done: number, total: number): P
 export async function finishDownloadNotification(total: number): Promise<void> {
   if (!permissionGranted) return;
   try {
+    // Same dismiss-then-repost pattern as updateDownloadNotification: on iOS,
+    // trigger:null notifications with the same identifier stack rather than replace.
+    await Notifications.dismissNotificationAsync(NOTIF_ID).catch(() => {});
     await Notifications.scheduleNotificationAsync({
       identifier: NOTIF_ID,
       content: {

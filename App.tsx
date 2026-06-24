@@ -111,10 +111,18 @@ export default function App() {
     syncOnLaunch(); // pull from sync folder if newer, non-blocking
 
     // Fetch the priority article in the background so it's readable during loading.
-    fetchAndCacheArticle(PRIORITY_ARTICLE_SLUG)
-      .then(() => getEntry(PRIORITY_ARTICLE_SLUG))
-      .then(entry => { if (entry) setPriorityArticle(entry); })
-      .catch(() => {});
+    // Only for SEP-scoped libraries; skip for OWL-only users (neoplatonism is SEP content).
+    // Check the cache first — if already present, skip the network round-trip.
+    if (prefs.libraryScope !== 'owl') {
+      getEntry(PRIORITY_ARTICLE_SLUG)
+        .then(existing => {
+          if (existing?.content_html) { setPriorityArticle(existing); return; }
+          return fetchAndCacheArticle(PRIORITY_ARTICLE_SLUG)
+            .then(() => getEntry(PRIORITY_ARTICLE_SLUG))
+            .then(entry => { if (entry) setPriorityArticle(entry); });
+        })
+        .catch(() => {});
+    }
 
     const count = await getEntryCount();
 

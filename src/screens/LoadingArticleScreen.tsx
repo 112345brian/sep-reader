@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Animated, FlatList, StyleSheet, Text,
   useWindowDimensions, View,
@@ -124,14 +124,13 @@ function Inner({ phase, downloadProgress, article }: Props) {
     return items;
   }, [article, parsed]);
 
-  // Header fills the viewport so the loading bar starts just below the fold.
-  const listHeader = (
+  const listHeader = useMemo(() => (
     <View style={[s.header, { minHeight: screenHeight, paddingTop: top + 48 }]}>
       <Text style={s.logo}>Nous</Text>
     </View>
-  );
+  ), [screenHeight, top]);
 
-  const renderItem = ({ item }: { item: ListItem }) => {
+  const renderItem = useCallback(({ item }: { item: ListItem }) => {
     if (item.kind === 'bar') {
       return (
         <>
@@ -160,7 +159,7 @@ function Inner({ phase, downloadProgress, article }: Props) {
         suppressTopBorder={item.idx === 0}
       />
     );
-  };
+  }, [phase, downloadProgress, article, mathSvgs]);
 
   return (
     <View style={{ flex: 1, backgroundColor: SEP_COLORS.bg }}>

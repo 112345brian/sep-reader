@@ -213,6 +213,9 @@ export async function downloadAll(
   const total = uncached.length + alreadyDone;
   let done = alreadyDone;
 
+  // Emit once upfront so callers always see the real total, even on a fully-cached library.
+  onProgress({ done, total, current: '' });
+
   const CONCURRENCY = 4;
   for (let i = 0; i < uncached.length; i += CONCURRENCY) {
     if (signal?.aborted) return;
