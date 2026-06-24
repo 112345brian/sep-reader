@@ -1,0 +1,3 @@
+[submodule "blind-design"]
+	path = blind-design
+	url = git@github.com:112345brian/nous-design.git
