@@ -381,14 +381,14 @@ export default function ArticleScreen() {
   // vertical-first (failOffsetY), so normal article scrolling is untouched.
   const swipeHome = Gesture.Pan()
     .activeOffsetX([-9999, 30])
-    .failOffsetY([-22, 22])
+    .failOffsetY([-40, 40])
     .onUpdate(e => {
       'worklet';
       if (e.translationX > 0) screenX.value = e.translationX;
     })
     .onEnd(e => {
       'worklet';
-      if (e.translationX > 80 && e.velocityX > 150) {
+      if (e.translationX > 60 || e.velocityX > 300) {
         // Reset immediately and let React Navigation drive the back transition.
         // Springing to 500 first leaves a blank #111 frame because the native
         // stack detaches the previous screen — nothing is rendered behind us.
