@@ -48,6 +48,25 @@ interface PendingAnnotation {
 
 const SEP_BASE = 'https://plato.stanford.edu';
 
+// Renders an unsupported block (nested table, animated SVG) in a sandboxed
+// WebView that sizes itself to content. Used as the renderFallback for SepArticle.
+function FallbackBlock({ html, baseUrl }: { html: string; baseUrl: string }) {
+  const [height, setHeight] = useState(120);
+  const doc = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:8px;background:#1a1a1a;color:#d0d0d0;font-family:-apple-system,sans-serif;font-size:14px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #333;padding:4px 8px}</style></head><body>${html}<script>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(String(document.body.scrollHeight));<\/script></body></html>`;
+  return (
+    <WebView
+      source={{ html: doc, baseUrl }}
+      style={{ height, marginVertical: 12 }}
+      scrollEnabled={false}
+      onMessage={(e) => {
+        const h = parseInt(e.nativeEvent.data, 10);
+        if (h > 0) setHeight(h + 16);
+      }}
+      javaScriptEnabled
+    />
+  );
+}
+
 const USE_NATIVE_RENDERER = true;
 
 // ── Icon helpers ───────────────────────────────────────────────────────────
@@ -537,6 +556,9 @@ export default function ArticleScreen() {
                 onAnnotationCreate={(text) => {
                   setPendingAnnotation({ selected_text: text, context: null, color: '#fbbf24' });
                 }}
+                renderFallback={(html) => (
+                  <FallbackBlock html={html} baseUrl={`${SEP_BASE}/entries/${slug}/`} />
+                )}
                 footer={backlinkCount > 0 ? (
                   <TouchableOpacity
                     style={styles.backlinksRow}

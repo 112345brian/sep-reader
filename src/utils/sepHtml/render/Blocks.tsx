@@ -57,12 +57,31 @@ function inlineText(inlines: Inline[]): string {
 // character ranges over its plain text. Skips empty selections (which would
 // otherwise match every paragraph) and supports multiple highlights per
 // paragraph, each matched to its own occurrence.
-function annotationHighlights(paraText: string, h: BlockHandlers): Highlight[] {
+//
+// When an annotation has a `context` field (a ±50-char window captured at
+// creation time), we use it to pick the right occurrence of selected_text
+// rather than blindly taking the first indexOf hit — which would paint the
+// wrong spot when the same phrase appears multiple times.
+export function annotationHighlights(paraText: string, h: BlockHandlers): Highlight[] {
   const anns = (h.annotations ?? []).filter(a => a.selected_text && a.selected_text.trim());
   if (!anns.length) return [];
   const ranges: Highlight[] = [];
   for (const a of anns) {
-    const idx = paraText.indexOf(a.selected_text);
+    let idx = -1;
+    if (a.context) {
+      // Try to locate context inside paraText. If found, the selected_text
+      // inside that context window is the right occurrence.
+      const ctxIdx = paraText.indexOf(a.context);
+      if (ctxIdx >= 0) {
+        const localIdx = a.context.indexOf(a.selected_text);
+        if (localIdx >= 0) idx = ctxIdx + localIdx;
+      }
+      // Context may be wider than paraText (crosses paragraph boundaries) or
+      // trimmed differently — fall back to first occurrence.
+      if (idx < 0) idx = paraText.indexOf(a.selected_text);
+    } else {
+      idx = paraText.indexOf(a.selected_text);
+    }
     if (idx >= 0) {
       ranges.push({
         start: idx,
