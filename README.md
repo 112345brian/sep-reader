@@ -1,6 +1,6 @@
 # Nous
 
-A native reader for the [Stanford Encyclopedia of Philosophy](https://plato.stanford.edu) and [The OWL](https://www.inphoproject.org). Runs on Android and macOS. Built with React Native 0.81 and react-native-macos.
+A philosophy reader app for Android and macOS, built to work well with the [Stanford Encyclopedia of Philosophy](https://plato.stanford.edu) and [InPhO](https://www.inphoproject.org). Built with React Native 0.81.
 
 ## Features
 
@@ -74,6 +74,8 @@ Nous is an independent reader. It is **not** affiliated with, endorsed by, or sp
 
 - **[Donate to the Stanford Encyclopedia of Philosophy](https://plato.stanford.edu/support/)** — the SEP is a freely available public good run by volunteer editors and funded by reader donations and library subscriptions. If you use this app to read the SEP, please give back.
 - **[InPhO Project, Indiana University](https://www.inphoproject.org)** — the semantic graph data (related articles, influence timelines) comes from InPhO. Their work makes the graph view possible.
+
+If you'd like to support Nous directly: **[ko-fi.com/112345brian](https://ko-fi.com/112345brian)**.
 
 ## Licensing & content
 
