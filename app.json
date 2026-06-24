@@ -12,7 +12,13 @@
     },
     "plugins": [
       "expo-sqlite",
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "download-progress"
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -581,24 +581,30 @@ export async function clearArticleCache(): Promise<void> {
   );
 }
 
-export async function getAllUncachedSlugs(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{ slug: string; title: string }[]> {
+export async function getSlugsByCacheStatus(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{
+  uncached: { slug: string; title: string }[];
+  cached: { slug: string; title: string }[];
+}> {
   const db = await getDb();
-  const where = scope === 'all'
-    ? 'cached_at IS NULL'
-    : `cached_at IS NULL AND source = '${scope}'`;
-  return db.getAllAsync<{ slug: string; title: string }>(
-    `SELECT slug, title FROM entries WHERE ${where} ORDER BY title ASC`
+  const where = scope === 'all' ? '' : `WHERE source = '${scope}'`;
+  const rows = await db.getAllAsync<{ slug: string; title: string; is_cached: number }>(
+    `SELECT slug, title, (cached_at IS NOT NULL) AS is_cached FROM entries ${where}`
   );
+  const uncached: { slug: string; title: string }[] = [];
+  const cached: { slug: string; title: string }[] = [];
+  for (const row of rows) {
+    if (row.is_cached) cached.push({ slug: row.slug, title: row.title });
+    else uncached.push({ slug: row.slug, title: row.title });
+  }
+  return { uncached, cached };
+}
+
+export async function getAllUncachedSlugs(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{ slug: string; title: string }[]> {
+  return (await getSlugsByCacheStatus(scope)).uncached;
 }
 
 export async function getCachedSlugs(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{ slug: string; title: string }[]> {
-  const db = await getDb();
-  const where = scope === 'all'
-    ? 'cached_at IS NOT NULL'
-    : `cached_at IS NOT NULL AND source = '${scope}'`;
-  return db.getAllAsync<{ slug: string; title: string }>(
-    `SELECT slug, title FROM entries WHERE ${where} ORDER BY cached_at DESC`
-  );
+  return (await getSlugsByCacheStatus(scope)).cached;
 }
 
 export async function getAllEntryTitles(): Promise<{ slug: string; title: string }[]> {

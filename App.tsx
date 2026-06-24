@@ -7,11 +7,12 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
-import { getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services/db';
+import { getEntry, getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services/db';
+import { APP_ACCENT } from './src/utils/sepHtml/render/theme';
 import { syncOnLaunch } from './src/services/dataSync';
 import { importSeedFromUrl } from './src/services/seedImport';
 import type { SeedPhase } from './src/services/seedImport';
-import { refreshIndexIfStale, downloadAll, syncCachedArticles, backfillMathInline, backfillAst, backfillMathHashFormat } from './src/services/catalog';
+import { backfillAst, backfillMathHashFormat, backfillMathInline, downloadAll, fetchAndCacheArticle, refreshIndexIfStale, syncCachedArticles } from './src/services/catalog';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
@@ -24,6 +25,10 @@ import ReadingListScreen from './src/screens/ReadingListScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import AnnotationsScreen from './src/screens/AnnotationsScreen';
 import GraphScreen from './src/screens/GraphScreen';
+import LoadingArticleScreen from './src/screens/LoadingArticleScreen';
+import { startDownloadNotification, updateDownloadNotification, finishDownloadNotification } from './src/services/downloadNotification';
+
+const FALLBACK_ARTICLE_SLUG = 'neoplatonism';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -58,12 +63,12 @@ const barStyles = StyleSheet.create({
 const THEME = {
   dark: true,
   colors: {
-    primary: '#7ba4ff',
+    primary: APP_ACCENT,
     background: '#121212',
     card: '#121212',
     text: '#e8e8e8',
     border: '#2a2a2a',
-    notification: '#7ba4ff',
+    notification: APP_ACCENT,
   },
   fonts: {
     regular: { fontFamily: 'System', fontWeight: '400' as const },
@@ -87,10 +92,11 @@ export default function App() {
   const [phase, setPhase] = useState<AppPhase>('booting');
   const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
   const [seedPhase, setSeedPhase] = useState<SeedPhase | null>(null);
+  const [priorityArticle, setPriorityArticle] = useState<import('./src/types').EntryRow | null>(null);
   const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
   useEffect(() => {
-    boot();
+    boot().catch(() => setPhase('index_error'));
   }, []);
 
   async function boot() {
@@ -104,6 +110,23 @@ export default function App() {
 
   async function initialize(prefs: Prefs) {
     syncOnLaunch(); // pull from sync folder if newer, non-blocking
+
+    // Fetch the priority article in the background so it's readable during loading.
+    // Only for SEP-scoped libraries; skip for OWL-only users (neoplatonism is SEP content).
+    // Check the cache first — if already present, skip the network round-trip.
+    if (prefs.libraryScope !== 'owl') {
+      getRecentSlugs(1).then(recent => {
+        const slug = recent[0]?.slug ?? FALLBACK_ARTICLE_SLUG;
+        return getEntry(slug)
+          .then(existing => {
+            if (existing?.content_html) { setPriorityArticle(existing); return; }
+            return fetchAndCacheArticle(slug)
+              .then(() => getEntry(slug))
+              .then(entry => { if (entry) setPriorityArticle(entry); });
+          });
+      }).catch(() => {});
+    }
+
     const count = await getEntryCount();
 
     if (count === 0) {
@@ -125,8 +148,15 @@ export default function App() {
     // network. MathRenderWebView is already mounted so the math backfill can use
     // it immediately after. Progress is shown on the splash screen.
     if (prefs.downloadAll) {
-      await downloadAll(p => setDownloadProgress(p), undefined, prefs.libraryScope);
+      await startDownloadNotification();
+      let lastTotal = 0;
+      await downloadAll(p => {
+        setDownloadProgress(p);
+        lastTotal = p.total;
+        updateDownloadNotification(p.done, p.total).catch(() => {});
+      }, undefined, prefs.libraryScope);
       setDownloadProgress(null);
+      finishDownloadNotification(lastTotal).catch(() => {});
     }
 
     // One-time migrations — no-ops on subsequent launches (each has a done flag).
@@ -180,54 +210,51 @@ export default function App() {
   // Always mounted so the math backfill can use it during boot.
   const mathWebView = <MathRenderWebView />;
 
-  if (phase === 'booting' || phase === 'seeding' || phase === 'seed_error' || phase === 'indexing' || phase === 'index_error') {
+  if (phase === 'seeding' || phase === 'seed_error') {
     return (
       <>
         {mathWebView}
         <View style={styles.boot}>
           <Text style={styles.bootLogo}>Nous</Text>
-          {phase === 'index_error' ? (
-            <Text style={styles.bootError}>Could not reach plato.stanford.edu.{'\n'}Check your connection and relaunch.</Text>
-          ) : phase === 'seed_error' ? (
+          {phase === 'seed_error' ? (
             <Text style={styles.bootError}>Could not download the seed database.{'\n'}Check the URL and relaunch.</Text>
-          ) : phase === 'seeding' && seedPhase ? (
-            seedPhase.phase === 'downloading' ? (
-              <>
-                <View style={styles.bootProgressTrack}>
-                  <View style={[styles.bootProgressFill, {
-                    width: seedPhase.bytesTotal > 0
-                      ? `${Math.round((seedPhase.bytesWritten / seedPhase.bytesTotal) * 100)}%` as any
-                      : '0%' as any,
-                  }]} />
-                </View>
-                <Text style={styles.bootLabel}>
-                  {seedPhase.bytesTotal > 0
-                    ? `${Math.round(seedPhase.bytesWritten / 1_048_576)} / ${Math.round(seedPhase.bytesTotal / 1_048_576)} MB`
-                    : `${Math.round(seedPhase.bytesWritten / 1_048_576)} MB…`}
-                </Text>
-              </>
-            ) : (
-              <>
-                <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
-                <Text style={styles.bootLabel}>
-                  {seedPhase.phase === 'validating' ? 'Validating…' : 'Installing…'}
-                </Text>
-              </>
-            )
-          ) : downloadProgress ? (
+          ) : seedPhase?.phase === 'downloading' ? (
             <>
               <View style={styles.bootProgressTrack}>
-                <View style={[styles.bootProgressFill, { width: `${(downloadProgress.done / downloadProgress.total) * 100}%` as any }]} />
+                <View style={[styles.bootProgressFill, {
+                  width: seedPhase.bytesTotal > 0
+                    ? `${Math.round((seedPhase.bytesWritten / seedPhase.bytesTotal) * 100)}%` as any
+                    : '0%' as any,
+                }]} />
               </View>
-              <Text style={styles.bootLabel}>{downloadProgress.done} / {downloadProgress.total}</Text>
+              <Text style={styles.bootLabel}>
+                {seedPhase.bytesTotal > 0
+                  ? `${Math.round(seedPhase.bytesWritten / 1_048_576)} / ${Math.round(seedPhase.bytesTotal / 1_048_576)} MB`
+                  : `${Math.round(seedPhase.bytesWritten / 1_048_576)} MB…`}
+              </Text>
             </>
           ) : (
             <>
-              <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
-              {phase === 'indexing' && <Text style={styles.bootLabel}>Building index…</Text>}
+              <ActivityIndicator color={APP_ACCENT} style={{ marginTop: 32 }} />
+              <Text style={styles.bootLabel}>
+                {seedPhase?.phase === 'validating' ? 'Validating…' : 'Installing…'}
+              </Text>
             </>
           )}
         </View>
+      </>
+    );
+  }
+
+  if (phase === 'booting' || phase === 'indexing' || phase === 'index_error') {
+    return (
+      <>
+        {mathWebView}
+        <LoadingArticleScreen
+          phase={phase}
+          downloadProgress={downloadProgress}
+          article={priorityArticle}
+        />
       </>
     );
   }
@@ -276,23 +303,40 @@ export default function App() {
 const styles = StyleSheet.create({
   boot: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#111',
     alignItems: 'center',
     justifyContent: 'center',
   },
   bootLogo: {
-    color: '#7ba4ff',
-    fontSize: 26,
+    color: APP_ACCENT,
+    fontSize: 22,
     fontWeight: '400',
     letterSpacing: 6,
   },
-  bootLabel: { color: '#444', fontSize: 13, marginTop: 12 },
-  bootError: { color: '#666', fontSize: 14, marginTop: 24, textAlign: 'center', lineHeight: 22, paddingHorizontal: 40 },
+  bootError: {
+    color: '#888',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 24,
+    lineHeight: 22,
+  },
+  bootLabel: {
+    color: '#555',
+    fontSize: 13,
+    marginTop: 12,
+  },
   bootProgressTrack: {
-    width: 160, height: 2, borderRadius: 1,
-    backgroundColor: '#1e1e1e', marginTop: 40, overflow: 'hidden',
+    width: 200,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#1e1e1e',
+    overflow: 'hidden',
+    marginTop: 32,
   },
   bootProgressFill: {
-    height: '100%', borderRadius: 1, backgroundColor: '#7ba4ff',
+    height: '100%',
+    borderRadius: 1,
+    backgroundColor: APP_ACCENT,
   },
 });
+

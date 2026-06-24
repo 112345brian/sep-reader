@@ -20,10 +20,11 @@ import { fetchAndCacheArticle } from '../services/catalog';
 import { primeBackfillForSlugs } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
+import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';
 import { SepArticle, type SepArticleHandle } from '../utils/sepHtml/render/SepArticle';
 import { ArticleHeader } from '../utils/sepHtml/render/ArticleHeader';
 import { InlineContent } from '../utils/sepHtml/render/Inline';
-import type { Inline, Block } from '../utils/sepHtml/types';
+import type { Inline } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet, { TOC_SHEET_H } from '../components/TocSheet';
 import { parseToc } from '../utils/parseToc';
@@ -216,33 +217,7 @@ export default function ArticleScreen() {
   // mathref nodes show invisible placeholders until this resolves (~1 DB query).
   useEffect(() => {
     if (!nativeArticle) { setMathSvgs({}); return; }
-    const hashes: string[] = [];
-    function collectInlineHashes(inlines: Inline[]) {
-      for (const n of inlines) {
-        if (n.t === 'mathref') hashes.push(n.hash);
-        else if ('children' in n && Array.isArray(n.children)) collectInlineHashes(n.children as Inline[]);
-      }
-    }
-    function collectBlockHashes(blocks: Block[]) {
-      for (const block of blocks) {
-        if (block.t === 'para' || block.t === 'heading') {
-          collectInlineHashes(block.children);
-        } else if (block.t === 'blockquote') {
-          collectBlockHashes(block.children);
-        } else if (block.t === 'list') {
-          block.items.forEach(item => collectBlockHashes(item));
-        } else if (block.t === 'deflist') {
-          block.rows.forEach(row => {
-            collectInlineHashes(row.term);
-            collectBlockHashes(row.def);
-          });
-        } else if (block.t === 'table') {
-          if (block.caption) collectInlineHashes(block.caption);
-          block.rows.forEach(row => row.cells.forEach(cell => collectInlineHashes(cell)));
-        }
-      }
-    }
-    collectBlockHashes(nativeArticle.blocks);
+    const hashes = collectMathHashes(nativeArticle.blocks);
     if (!hashes.length) return;
     getMathSvgMap(hashes).then(setMathSvgs).catch(() => {});
   }, [nativeArticle]);

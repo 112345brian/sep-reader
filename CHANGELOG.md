@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Readable article during initialization** — on first launch with bulk download enabled, the Neoplatonism article is fetched in the background as soon as initialization begins. Once ready, a bouncing arrow and the article title appear at the bottom of the loading screen; swiping up reveals the article below a sticky loading bar so you can read while the library downloads.
+- **Download progress notification** — during bulk library download, a system notification shows the current count ("847 / 1800 articles") in the notification shade, visible from other apps. Throttled to update at most once every 4 seconds or 25 articles. Auto-dismisses 8 seconds after the download completes. Requires notification permission (requested once at download start).
+- **Credits and Support in Settings** — a Credits section lists the Stanford Encyclopedia of Philosophy and InPhO (Indiana University) as suggested sources with links to their homepages. A Support section links to the SEP donation page and Ko-fi.
+
+### Changed
+- **Renamed to Nous** — repo, Android package (`com.nous.app`), and README updated. App name in `app.json` and `package.json` was already Nous.
+
+### Fixed
+- **Bulk download showed "0 / N" on resume** — if the app was killed mid-download and relaunched, the progress counter reset to zero even though already-cached articles were correctly skipped. The counter now starts at the cached count ("900 / 1800") so it's clear work wasn't lost.
+- **Download complete notification stacked on iOS** — after bulk download finished, the "Library ready" notification appeared alongside the last progress notification instead of replacing it. Now dismisses the progress notification first, matching the update behavior.
+- **"0 articles downloaded" on fully-cached launches** — the download-complete notification showed "0 articles downloaded" if the library was already fully cached (nothing left to fetch). Now always reports the true library size.
+- **Priority article re-fetched on every launch** — the Neoplatonism article was hitting the network unconditionally at startup even if already cached. Now checks the local cache first and only fetches if the content is absent. Also skipped entirely for OWL-only libraries.
+- **Loading screen re-rendered all cells on every progress tick** — `renderItem` and `listHeader` were recreated on each render, causing FlatList to remount the header and re-render all visible blocks whenever the download counter ticked up.
+
 ## [0.6.2]
 
 ### Fixed

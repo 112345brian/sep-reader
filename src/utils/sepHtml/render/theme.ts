@@ -2,6 +2,8 @@
 // WebView pixel-for-pixel. Base font 17px, line-height 1.8 (≈30.6px).
 import type { TextStyle, ViewStyle } from 'react-native';
 
+export const APP_ACCENT = '#7ba4ff';
+
 export const SEP_COLORS = {
   bg: '#111111',
   bgRaised: '#1c1c1c',
