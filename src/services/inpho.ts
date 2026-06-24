@@ -18,6 +18,7 @@ import {
   inphoIndexCount, replaceInphoIndex, getInphoNodeBySep,
   getCachedInphoRelations, cacheInphoRelations, buildSemanticGraph,
   buildInfluenceGraph, buildTimelineGraph, getThinkersMissingDates, setInphoDates,
+  getCachedThinkerIdsForSlugs,
   type InphoNodeRow, type GraphData, type GraphMode, type InphoRelations,
 } from './graphDb';
 
@@ -201,3 +202,23 @@ export async function getGraph(centerSlug: string, mode: GraphMode = 'related'):
 
 /** @deprecated use getGraph(slug, 'related') */
 export const getSemanticGraph = (slug: string) => getGraph(slug, 'related');
+
+/**
+ * Proactively backfill birth/death years for thinkers associated with the
+ * given slugs, in priority order. Uses only already-cached InPhO relation
+ * data — does not trigger any new network fetches for relations themselves.
+ *
+ * Intended to be called fire-and-forget when an article becomes ready, so
+ * that by the time the user opens Timeline the dates are already populated.
+ *
+ * Priority: first slug's thinkers are fetched first (pass the active article
+ * slug first, then the reading-list slugs in recency order).
+ */
+export async function primeBackfillForSlugs(slugs: string[]): Promise<void> {
+  try {
+    const thinkerIds = await getCachedThinkerIdsForSlugs(slugs);
+    if (thinkerIds.length > 0) await backfillDates(thinkerIds);
+  } catch {
+    // Best-effort — never let this surface as an error to the caller.
+  }
+}

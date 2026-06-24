@@ -170,15 +170,19 @@ export async function setInphoDates(id: number, birth: number | null, death: num
   );
 }
 
-/** Thinker nodes (by id) whose dates haven't been fetched yet — drives lazy backfill. */
+/** Thinker nodes (by id) whose dates haven't been fetched yet — drives lazy backfill.
+ *  Result is sorted to match the caller's priority order (first id = highest priority). */
 export async function getThinkersMissingDates(ids: number[]): Promise<InphoNodeRow[]> {
   if (ids.length === 0) return [];
   const db = await gdb();
-  return db.getAllAsync<InphoNodeRow>(
+  const rows = await db.getAllAsync<InphoNodeRow>(
     `SELECT id, kind, label, sep_dir, birth_year, death_year FROM inpho_nodes
      WHERE kind = 'thinker' AND dates_checked = 0 AND id IN (${ids.map(() => '?').join(',')})`,
     ids
   );
+  // Preserve caller-supplied priority order (SQLite IN (...) returns in rowid order).
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  return rows.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
 }
 
 /** Replace the whole InPhO index in one transaction.
@@ -219,6 +223,34 @@ export async function getInphoNodeBySep(slug: string): Promise<InphoNodeRow | nu
 
 // Relations cache TTL: re-fetch after 7 days (InPhO updates monthly).
 const RELATIONS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Return thinker IDs from already-cached InPhO relations for a list of slugs,
+ *  in priority order (first slug's thinkers first), deduped. Skips slugs with
+ *  no cache entry or stale cache — does not trigger any network fetch. */
+export async function getCachedThinkerIdsForSlugs(slugs: string[]): Promise<number[]> {
+  if (slugs.length === 0) return [];
+  const db = await gdb();
+  const placeholders = slugs.map(() => '?').join(',');
+  const rows = await db.getAllAsync<{ slug: string; payload: string; fetched_at: number }>(
+    `SELECT slug, payload, fetched_at FROM inpho_relations WHERE slug IN (${placeholders})`,
+    slugs
+  );
+  // Index by slug so we can emit in caller-supplied priority order.
+  const bySlug = new Map(rows.map(r => [r.slug, r]));
+  const now = Date.now();
+  const seen = new Set<number>();
+  const result: number[] = [];
+  for (const slug of slugs) {
+    const row = bySlug.get(slug);
+    if (!row || now - row.fetched_at > RELATIONS_TTL_MS) continue;
+    let rel: InphoRelations;
+    try { rel = JSON.parse(row.payload); } catch { continue; }
+    for (const id of rel.thinkers) {
+      if (!seen.has(id)) { seen.add(id); result.push(id); }
+    }
+  }
+  return result;
+}
 
 export async function getCachedInphoRelations(slug: string): Promise<InphoRelations | null> {
   const db = await gdb();
