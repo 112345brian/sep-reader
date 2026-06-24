@@ -2,8 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+- **Images in native renderer** — `case 'image'` blocks now render via RN `<Image>` with relative srcs resolved against `https://plato.stanford.edu/entries/{slug}/`. Previously all article figures were silently dropped.
+- **Annotation display in native renderer** — existing highlights appear as a colored left border on their paragraph; tapping opens the edit modal. Long-pressing any paragraph opens the annotation creation modal with the paragraph text pre-filled.
+- **`collectMathNodes`** (`mathStore.ts`) — walks a `ParsedArticle` block tree to collect all TeX nodes; used by `hydrateMath` to warm the SVG cache before render.
+
 ### Changed
 - **`has_math` flag on cached articles** — detected at cache time (string scan for `\(` / `\[`); ~76% of articles have no math and now skip the AST walk and SQLite warm-up on every open.
+- **Native renderer enabled** — `USE_NATIVE_RENDERER = true`; article bodies now render via the custom native parser/renderer instead of WebView. `recordRead` is fire-and-forget (removes 2 SQLite round-trips from the navigation critical path); `getMeta` results are cached in memory (custom CSS and font size no longer re-queried on every article open); `buildArticleHtml` skipped in native mode.
+- **TOC jump wired for native** — `SepArticle` now exposes a `scrollToSection(id)` imperative handle via `forwardRef`; `handleTocJump` uses it instead of WebView JS injection.
+- **`resolveMath` wired** — native renderer uses the real on-device TeX→SVG resolver (`mathStore.resolveMath`) with SQLite-backed session cache; previous stub returned `null` for all math.
 
 ## [0.4.1] — 2026-06-23
 

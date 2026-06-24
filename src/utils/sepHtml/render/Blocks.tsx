@@ -1,16 +1,33 @@
 import React from 'react';
-import { Text, View, type LayoutChangeEvent } from 'react-native';
-import type { Block } from '../types';
+import { Text, View, Image, Pressable, type LayoutChangeEvent } from 'react-native';
+import type { Block, Inline } from '../types';
+import type { Annotation } from '../../../types';
 import { InlineContent, InlineHandlers } from './Inline';
 import { MathSvg } from './MathSvg';
 import { SEP_COLORS, sepBlock, sepText } from './theme';
 
 export interface BlockHandlers extends InlineHandlers {
-  // Section headings report their y-offset for scroll-spy / TOC jump.
   onHeadingLayout?: (id: string, y: number) => void;
   // Fallback for `unsupported` blocks (nested tables, animated SVG). The screen
   // supplies a scoped WebView; if absent we show a quiet placeholder.
   renderFallback?: (html: string) => React.ReactNode;
+  // Resolve a relative image src to an absolute URI. Return null to skip the image.
+  resolveImageSrc?: (src: string) => string | null;
+  // Annotations to highlight. Matched at the paragraph text level.
+  annotations?: Annotation[];
+  onAnnotationPress?: (ann: Annotation) => void;
+  // Long-press on a paragraph triggers this with its plain text.
+  onAnnotationCreate?: (text: string) => void;
+}
+
+// Extract plain text from an inline tree for annotation matching.
+function inlineText(inlines: Inline[]): string {
+  return inlines.map(n => {
+    if (n.t === 'text') return n.v;
+    if (n.t === 'code') return n.v;
+    if ('children' in n && Array.isArray(n.children)) return inlineText(n.children as Inline[]);
+    return '';
+  }).join('');
 }
 
 function Blocks({ blocks, h, keyPrefix = 'b' }: { blocks: Block[]; h: BlockHandlers; keyPrefix?: string }) {
@@ -38,31 +55,49 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
       );
     }
     case 'para': {
+      const paraText = inlineText(block.children);
+      const ann = h.annotations?.find(a => a.selected_text && paraText.includes(a.selected_text));
+
       // Display math (\[…\]) parses as an inline node but renders as a centered
       // block, so split the paragraph around any display-math nodes.
       const hasDisplay = block.children.some(c => c.t === 'math' && c.display);
+      let inner: React.ReactNode;
       if (!hasDisplay) {
+        inner = <InlineContent inlines={block.children} handlers={h} />;
+      } else {
+        const segments: React.ReactNode[] = [];
+        let run: typeof block.children = [];
+        const flush = (key: string) => {
+          if (run.length) { segments.push(<InlineContent key={key} inlines={run} handlers={h} />); run = []; }
+        };
+        block.children.forEach((c, i) => {
+          if (c.t === 'math' && c.display) {
+            flush(`r${i}`);
+            segments.push(<MathSvg key={`dm${i}`} tex={c.tex} display resolve={h.resolveMath} />);
+          } else {
+            run.push(c);
+          }
+        });
+        flush('rEnd');
+        inner = <>{segments}</>;
+      }
+
+      if (ann || h.onAnnotationCreate) {
         return (
-          <View style={sepBlock.paraGap}>
-            <InlineContent inlines={block.children} handlers={h} />
-          </View>
+          <Pressable
+            style={[
+              sepBlock.paraGap,
+              ann && { borderLeftWidth: 3, borderLeftColor: ann.color, paddingLeft: 10 },
+            ]}
+            onPress={ann ? () => h.onAnnotationPress?.(ann) : undefined}
+            onLongPress={h.onAnnotationCreate ? () => h.onAnnotationCreate!(paraText) : undefined}
+            delayLongPress={600}
+          >
+            {inner}
+          </Pressable>
         );
       }
-      const segments: React.ReactNode[] = [];
-      let run: typeof block.children = [];
-      const flush = (key: string) => {
-        if (run.length) { segments.push(<InlineContent key={key} inlines={run} handlers={h} />); run = []; }
-      };
-      block.children.forEach((c, i) => {
-        if (c.t === 'math' && c.display) {
-          flush(`r${i}`);
-          segments.push(<MathSvg key={`dm${i}`} tex={c.tex} display resolve={h.resolveMath} />);
-        } else {
-          run.push(c);
-        }
-      });
-      flush('rEnd');
-      return <View style={sepBlock.paraGap}>{segments}</View>;
+      return <View style={sepBlock.paraGap}>{inner}</View>;
     }
     case 'blockquote':
       return (
@@ -121,10 +156,20 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
       );
     case 'rule':
       return <View style={{ height: 1, backgroundColor: SEP_COLORS.border, marginVertical: 20 }} />;
-    case 'image':
-      // Raster images (equation pngs / icons) resolved by the screen later; for
-      // now omit rather than show a broken box. Display math uses SVG, not <img>.
-      return null;
+    case 'image': {
+      const uri = h.resolveImageSrc?.(block.src) ?? null;
+      if (!uri) return null;
+      return (
+        <View style={{ alignItems: 'center', marginVertical: 12 }}>
+          <Image
+            source={{ uri }}
+            style={{ width: '100%', height: 180 }}
+            resizeMode="contain"
+            accessibilityLabel={block.alt || undefined}
+          />
+        </View>
+      );
+    }
     case 'unsupported':
       return <>{h.renderFallback ? h.renderFallback(block.html) : (
         <View style={{ padding: 12, backgroundColor: SEP_COLORS.bgRaised, borderRadius: 6, marginVertical: 12 }}>

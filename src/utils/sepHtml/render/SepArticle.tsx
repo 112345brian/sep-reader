@@ -1,6 +1,7 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useImperativeHandle, useRef } from 'react';
 import { ScrollView, View, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
 import type { ParsedArticle } from '../types';
+import type { Annotation } from '../../../types';
 import { Blocks, BlockHandlers } from './Blocks';
 import { MathResolver } from './MathSvg';
 import { SEP_COLORS, SEP_SIDE_PAD } from './theme';
@@ -15,13 +16,21 @@ export interface SepArticleProps {
   // Active section id as the user scrolls (scroll-spy for the TOC).
   onActiveSection?: (id: string) => void;
   renderFallback?: (html: string) => React.ReactNode;
-  // Imperatively scroll to a section (TOC jump). Returned via ref.
-  scrollRef?: React.Ref<ScrollView>;
+  resolveImageSrc?: (src: string) => string | null;
+  annotations?: Annotation[];
+  onAnnotationPress?: (ann: Annotation) => void;
+  onAnnotationCreate?: (text: string) => void;
 }
 
-export function SepArticle({
-  article, resolveMath, onLinkPress, onFootnotePress, onProgress, onActiveSection, renderFallback, scrollRef,
-}: SepArticleProps) {
+export interface SepArticleHandle {
+  scrollToSection: (id: string) => void;
+}
+
+export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(function SepArticle({
+  article, resolveMath, onLinkPress, onFootnotePress, onProgress, onActiveSection, renderFallback,
+  resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate,
+}, ref) {
+  const scrollViewRef = useRef<ScrollView>(null);
   const headingOffsets = useRef<{ id: string; y: number }[]>([]);
   const lastProgress = useRef(0);
   const lastSection = useRef('');
@@ -55,17 +64,28 @@ export function SepArticle({
     }
   }, [onProgress, onActiveSection]);
 
+  useImperativeHandle(ref, () => ({
+    scrollToSection(id: string) {
+      const entry = headingOffsets.current.find(o => o.id === id);
+      if (entry) scrollViewRef.current?.scrollTo({ y: entry.y, animated: true });
+    },
+  }));
+
   const handlers: BlockHandlers = {
     resolveMath,
     onLinkPress,
     onFootnotePress,
     onHeadingLayout,
     renderFallback,
+    resolveImageSrc,
+    annotations,
+    onAnnotationPress,
+    onAnnotationCreate,
   };
 
   return (
     <ScrollView
-      ref={scrollRef}
+      ref={scrollViewRef}
       style={{ backgroundColor: SEP_COLORS.bg }}
       contentContainerStyle={{ paddingHorizontal: SEP_SIDE_PAD, paddingTop: 16, paddingBottom: 96 }}
       onScroll={handleScroll}
@@ -76,4 +96,4 @@ export function SepArticle({
       </View>
     </ScrollView>
   );
-}
+});
