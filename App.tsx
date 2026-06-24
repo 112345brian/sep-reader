@@ -12,6 +12,7 @@ import { syncOnLaunch } from './src/services/dataSync';
 import { refreshIndexIfStale, downloadAll, syncCachedArticles, backfillMathInline } from './src/services/catalog';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
+import MathRenderWebView from './src/components/MathRenderWebView';
 import TestRunnerScreen from './src/screens/TestRunnerScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import ArticleScreen from './src/screens/ArticleScreen';
@@ -189,6 +190,8 @@ export default function App() {
             <Stack.Screen name="Graph" component={GraphScreen} />
           </Stack.Navigator>
         </NavigationContainer>
+        {/* Off-screen MathJax renderer (TeX→SVG; MathJax can't run on Hermes) */}
+        <MathRenderWebView />
         {downloadProgress && (
           <View style={styles.downloadBar}>
             <View

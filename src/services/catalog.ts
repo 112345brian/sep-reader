@@ -1,38 +1,42 @@
 import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
-import { texToSvg } from '../utils/sepHtml/render/texToSvg';
+import { renderMathBatch } from './mathRender';
 
 // Replace all \(…\) and \[…\] TeX math in the raw HTML with <math-i> elements
-// whose text content is the base64-encoded pre-rendered SVG. The parser decodes
-// and emits these as `mathsvg` AST nodes — MathJax never runs at read time.
-// Yields every 10 equations during bulk download to stay off the critical path.
+// whose text content is the base64-encoded pre-rendered SVG. The SVGs are
+// rendered by the off-screen MathRenderWebView (MathJax can't run on Hermes);
+// the parser later decodes <math-i> into `mathsvg` AST nodes, so no MathJax runs
+// at read time.
 const MATH_SUBST_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g;
 async function substitutemath(html: string): Promise<string> {
-  const matches: Array<{ index: number; len: number; tag: string }> = [];
+  const spots: Array<{ index: number; len: number; tex: string; display: boolean }> = [];
   MATH_SUBST_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
-  let n = 0;
   while ((m = MATH_SUBST_RE.exec(html)) !== null) {
-    if (n > 0 && n % 10 === 0) await new Promise<void>(r => setTimeout(r, 0));
-    n++;
     const inline = m[1];
     const block = m[2];
-    const tex = decodeEntities((inline ?? block).trim());
-    const display = block !== undefined;
-    const result = texToSvg(tex, display);
-    if ('error' in result) continue; // leave failures as raw TeX
-    const b64 = btoa(result.svg);
-    const w = (result.width ?? 1).toFixed(4);
-    const h = (result.height ?? 1).toFixed(4);
-    const d = display ? '1' : '0';
-    matches.push({ index: m.index, len: m[0].length, tag: `<math-i d="${d}" w="${w}" h="${h}">${b64}</math-i>` });
+    spots.push({
+      index: m.index,
+      len: m[0].length,
+      tex: decodeEntities((inline ?? block).trim()),
+      display: block !== undefined,
+    });
   }
-  if (!matches.length) return html;
-  // Splice in reverse so indices stay valid.
+  if (!spots.length) return html;
+
+  const results = await renderMathBatch(spots.map(s => ({ tex: s.tex, display: s.display })));
+
+  // Splice in reverse so earlier indices stay valid. Equations that failed to
+  // render (results[i].error) are left as raw TeX for the legacy fallback.
   let out = html;
-  for (let i = matches.length - 1; i >= 0; i--) {
-    const { index, len, tag } = matches[i];
+  for (let i = spots.length - 1; i >= 0; i--) {
+    const r = results[i];
+    if (!r || r.error || !r.b64) continue;
+    const { index, len, display } = spots[i];
+    const w = (r.w ?? 1).toFixed(4);
+    const h = (r.h ?? 1).toFixed(4);
+    const tag = `<math-i d="${display ? '1' : '0'}" w="${w}" h="${h}">${r.b64}</math-i>`;
     out = out.slice(0, index) + tag + out.slice(index + len);
   }
   return out;
@@ -42,7 +46,9 @@ async function substitutemath(html: string): Promise<string> {
 // articles so their stored content_html has SVGs instead of raw TeX.
 // Runs entirely from the local DB — no network. Guarded by a meta key.
 export async function backfillMathInline(): Promise<void> {
-  const done = await getMeta('math_inline_v1');
+  // v2: v1 ran before the WebView renderer existed and converted nothing
+  // (MathJax can't run on Hermes), so re-run once against the real renderer.
+  const done = await getMeta('math_inline_v2');
   if (done) return;
   const articles = await getMathArticleHtml();
   for (const article of articles) {
@@ -56,7 +62,7 @@ export async function backfillMathInline(): Promise<void> {
       // non-fatal — article will fall back to legacy monospace TeX
     }
   }
-  await setMeta('math_inline_v1', '1');
+  await setMeta('math_inline_v2', '1');
 }
 
 const BASE = 'https://plato.stanford.edu';
