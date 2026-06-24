@@ -9,7 +9,8 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { getEntryPreview } from '../services/db';
-import type { GraphNode, GraphEdge, GraphMode } from '../services/graphDb';
+import { getArticleLinkGraph } from '../services/graphDb';
+import type { GraphNode, GraphEdge, GraphView } from '../services/graphDb';
 import { getGraph } from '../services/inpho';
 import type { RootStackParamList } from '../../App';
 
@@ -128,6 +129,7 @@ const KIND_COLOR: Record<string, { fill: string; stroke: string }> = {
   entry:   { fill: '#5b8ef5', stroke: '#5b8ef5' },
   idea:    { fill: '#1f3a36', stroke: '#3fa796' },
   thinker: { fill: '#3a2e1a', stroke: '#c79a3f' },
+  linked:  { fill: '#26324a', stroke: '#5b8ef5' }, // neighbouring entry (Links view)
 };
 
 function IconArrowUp({ color = '#9a9a9a' }: { color?: string }) {
@@ -146,7 +148,7 @@ export default function GraphScreen() {
   const centerTitle = (route.params as any)?.centerTitle as string | undefined;
   const { width, height } = useWindowDimensions();
 
-  const [mode, setMode] = useState<GraphMode>('related');
+  const [mode, setMode] = useState<GraphView>('links');
   const [nodes, setNodes] = useState<LayoutNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState(true);
@@ -179,7 +181,12 @@ export default function GraphScreen() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getGraph(centerSlug ?? '', mode).then(data => {
+    // 'links' is the SEP hyperlink neighbourhood (our own link index); the other
+    // modes are the InPhO semantic graph.
+    const load = mode === 'links'
+      ? getArticleLinkGraph(centerSlug ?? '')
+      : getGraph(centerSlug ?? '', mode);
+    load.then(data => {
       if (cancelled) return;
       const laid = mode === 'timeline'
         ? timelineLayout(data.nodes, width, canvasH)
@@ -227,9 +234,9 @@ export default function GraphScreen() {
         <View style={styles.back} />
       </View>
 
-      {/* ── Mode switcher (Related / Timeline / Influence) ── */}
+      {/* ── View switcher (Links / Related / Timeline / Influence) ── */}
       <View style={styles.modeBar}>
-        {(['related', 'timeline', 'influence'] as GraphMode[]).map(m => (
+        {(['links', 'related', 'timeline', 'influence'] as GraphView[]).map(m => (
           <TouchableOpacity
             key={m}
             style={[styles.modeChip, mode === m && styles.modeChipActive]}
@@ -237,7 +244,7 @@ export default function GraphScreen() {
             activeOpacity={0.7}
           >
             <Text style={[styles.modeChipText, mode === m && styles.modeChipTextActive]}>
-              {m === 'related' ? 'Related' : m === 'timeline' ? 'Timeline' : 'Influence'}
+              {m === 'links' ? 'Links' : m === 'related' ? 'Related' : m === 'timeline' ? 'Timeline' : 'Influence'}
             </Text>
           </TouchableOpacity>
         ))}
@@ -252,10 +259,12 @@ export default function GraphScreen() {
         ) : nodes.length === 0 ? (
           <View style={styles.loadingWrap}>
             <Text style={styles.emptyTitle}>
-              {mode === 'influence' ? 'No influence links' : mode === 'timeline' ? 'No dated thinkers' : 'No connections'}
+              {mode === 'links' ? 'No links' : mode === 'influence' ? 'No influence links' : mode === 'timeline' ? 'No dated thinkers' : 'No connections'}
             </Text>
             <Text style={styles.emptyHint}>
-              {mode === 'influence'
+              {mode === 'links'
+                ? 'This article has no cross-references to other entries yet,\nor it hasn’t been cached — open it once to index its links.'
+                : mode === 'influence'
                 ? 'InPhO has no teacher/student/influence edges for this entry.'
                 : mode === 'timeline'
                 ? 'No related thinkers with recorded dates were found.'
@@ -317,7 +326,7 @@ export default function GraphScreen() {
                         y={node.y + r + 12}
                         textAnchor="middle"
                         fontSize={9}
-                        fill={isCenter ? '#5b8ef5' : node.kind === 'thinker' ? '#c79a3f' : '#3fa796'}
+                        fill={isCenter ? '#5b8ef5' : node.kind === 'thinker' ? '#c79a3f' : node.kind === 'linked' ? '#7da0d8' : '#3fa796'}
                       >
                         {label}
                       </SvgText>
@@ -334,14 +343,23 @@ export default function GraphScreen() {
             <View style={[styles.legendDot, { backgroundColor: '#5b8ef5' }]} />
             <Text style={styles.legendLabel}>This entry</Text>
           </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#1f3a36', borderWidth: 1, borderColor: '#3fa796' }]} />
-            <Text style={styles.legendLabel}>Idea</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#3a2e1a', borderWidth: 1, borderColor: '#c79a3f' }]} />
-            <Text style={styles.legendLabel}>Thinker</Text>
-          </View>
+          {mode === 'links' ? (
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#26324a', borderWidth: 1, borderColor: '#5b8ef5' }]} />
+              <Text style={styles.legendLabel}>Linked entry</Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: '#1f3a36', borderWidth: 1, borderColor: '#3fa796' }]} />
+                <Text style={styles.legendLabel}>Idea</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: '#3a2e1a', borderWidth: 1, borderColor: '#c79a3f' }]} />
+                <Text style={styles.legendLabel}>Thinker</Text>
+              </View>
+            </>
+          )}
         </View>
       </View>
 

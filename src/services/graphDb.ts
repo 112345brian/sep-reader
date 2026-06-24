@@ -15,7 +15,9 @@ import { getDb } from './db';
 
 export interface GraphNode {
   slug: string; title: string; read: boolean;
-  kind?: 'entry' | 'idea' | 'thinker';
+  // 'entry' = the centred article; 'idea'/'thinker' = InPhO nodes;
+  // 'linked' = a neighbouring entry in the SEP hyperlink graph.
+  kind?: 'entry' | 'idea' | 'thinker' | 'linked';
   birthYear?: number | null; deathYear?: number | null; // Timeline view
 }
 export interface GraphEdge { from_slug: string; to_slug: string; }
@@ -28,7 +30,12 @@ export interface InphoNodeRow {
 export interface InphoInfluence { teachers: number[]; students: number[]; influenced: number[]; influenced_by: number[]; }
 export interface InphoRelations { ideas: number[]; thinkers: number[]; influence?: InphoInfluence; }
 
+// InPhO semantic-graph modes, served by services/inpho.ts getGraph().
 export type GraphMode = 'related' | 'timeline' | 'influence';
+
+// The full set of views the graph screen toggles between: the SEP hyperlink graph
+// (getArticleLinkGraph, grounded in our own link index) plus the InPhO modes.
+export type GraphView = 'links' | GraphMode;
 
 // ── Schema (owned here, created on first use) ────────────────────────────────
 
@@ -139,6 +146,7 @@ export async function getArticleLinkGraph(centerSlug: string): Promise<GraphData
       slug,
       title: titleMap.get(slug) ?? slug,
       read: readSet.has(slug),
+      kind: (slug === centerSlug ? 'entry' : 'linked') as 'entry' | 'linked',
     })),
     edges,
   };
