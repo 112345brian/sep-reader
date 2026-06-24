@@ -213,16 +213,20 @@ export async function downloadAll(
   // Emit once upfront so callers always see the real total, even on a fully-cached library.
   onProgress({ done, total, current: '' });
 
-  const CONCURRENCY = 4;
+  // Skip math rendering during bulk download — backfillMathInline runs after
+  // and handles all math articles in one pass. Rendering math inline here
+  // requires a WebView round-trip per equation and turns a 20-min download
+  // into a 2-hour one for a library with ~450 math articles.
+  const CONCURRENCY = 6;
   for (let i = 0; i < uncached.length; i += CONCURRENCY) {
     if (signal?.aborted) return;
     const chunk = uncached.slice(i, i + CONCURRENCY);
     await Promise.all(chunk.map(async ({ slug, title }) => {
-      await fetchAndCacheArticle(slug);
+      await fetchAndCacheArticle(slug, { skipMath: true });
       done++;
       onProgress({ done, total, current: title });
     }));
-    await new Promise<void>(r => setTimeout(r, 300));
+    await new Promise<void>(r => setTimeout(r, 100));
   }
 }
 
@@ -248,7 +252,7 @@ export async function syncCachedArticles(
   await setMeta('last_deep_sync', String(Date.now()));
 }
 
-export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
+export async function fetchAndCacheArticle(slug: string, opts: { skipMath?: boolean } = {}): Promise<boolean> {
   try {
     const res = await fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS });
     if (!res.ok) return false;
@@ -267,8 +271,8 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
 
     const linkedHtml = linkifyHtml(contentHtml);
     const hasMath = linkedHtml.includes('\\(') || linkedHtml.includes('\\[');
-    // Substitute math before storing so content_html is always SVG-ready.
-    const finalHtml = hasMath ? await substitutemath(linkedHtml) : linkedHtml;
+    // Substitute math unless caller opted out (bulk download defers to backfillMathInline).
+    const finalHtml = hasMath && !opts.skipMath ? await substitutemath(linkedHtml) : linkedHtml;
     // Pre-parse the AST so ArticleScreen can JSON.parse instead of re-parsing HTML.
     const content_ast = JSON.stringify(parseSepHtml(finalHtml));
     await cacheArticle(slug, {
