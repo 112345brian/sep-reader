@@ -19,6 +19,7 @@
     "expo": "~54.0.0",
     "expo-asset": "~12.0.13",
     "expo-file-system": "~19.0.23",
+    "expo-notifications": "~0.32.17",
     "expo-sqlite": "~16.0.10",
     "htmlparser2": "^9.1.0",
     "mathjax-full": "^3.2.1",

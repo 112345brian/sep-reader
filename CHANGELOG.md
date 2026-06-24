@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Readable article during initialization** — on first launch with bulk download enabled, the Neoplatonism article is fetched in the background as soon as initialization begins. Once ready, a bouncing arrow and the article title appear at the bottom of the loading screen; swiping up reveals the article below a sticky loading bar so you can read while the library downloads.
+- **Download progress notification** — during bulk library download, a system notification shows the current count ("847 / 1800 articles") in the notification shade, visible from other apps. Throttled to update at most once every 4 seconds or 25 articles. Auto-dismisses 8 seconds after the download completes. Requires notification permission (requested once at download start).
+
+### Fixed
+- **Bulk download showed "0 / N" on resume** — if the app was killed mid-download and relaunched, the progress counter reset to zero even though already-cached articles were correctly skipped. The counter now starts at the cached count ("900 / 1800") so it's clear work wasn't lost.
+
 ## [0.6.2] — 2026-06-24
 
 ### Fixed
