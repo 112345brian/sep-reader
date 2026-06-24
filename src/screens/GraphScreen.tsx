@@ -9,7 +9,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { getEntryPreview } from '../services/db';
-import type { GraphNode, GraphEdge, GraphMode } from '../services/db';
+import type { GraphNode, GraphEdge, GraphMode } from '../services/graphDb';
 import { getGraph } from '../services/inpho';
 import type { RootStackParamList } from '../../App';
 

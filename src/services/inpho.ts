@@ -12,13 +12,13 @@
  *      relations once (cached), and build a navigable graph of related ideas +
  *      related thinkers that exist in our corpus.
  */
+import { getMeta, setMeta } from './db';
 import {
   inphoIndexCount, replaceInphoIndex, getInphoNodeBySep,
   getCachedInphoRelations, cacheInphoRelations, buildSemanticGraph,
   buildInfluenceGraph, buildTimelineGraph, getThinkersMissingDates, setInphoDates,
-  getMeta, setMeta,
   type InphoNodeRow, type GraphData, type GraphMode, type InphoRelations,
-} from './db';
+} from './graphDb';
 
 const INPHO_BASE = 'https://www.inphoproject.org';
 const HEADERS = { 'User-Agent': 'Nous/0.3 (SEP reader; +https://github.com/112345brian/sep-reader)' };
