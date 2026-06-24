@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, FlatList, SectionList, TouchableOpacity,
-  StyleSheet, StatusBar, ActivityIndicator, Alert, PanResponder,
+  StyleSheet, StatusBar, ActivityIndicator, Alert,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -106,45 +106,37 @@ function AlphabetScrubber({
   const lettersRef = useRef(letters);
   lettersRef.current = letters;
 
-  function pickLetter(pageY: number): string {
+  function pickLetter(absoluteY: number): string {
     const { top, height } = metricsRef.current;
     if (height === 0) return '';
-    const rel = Math.max(0, Math.min(0.9999, (pageY - top) / height));
+    const rel = Math.max(0, Math.min(0.9999, (absoluteY - top) / height));
     const idx = Math.floor(rel * lettersRef.current.length);
     return lettersRef.current[idx] ?? lettersRef.current[lettersRef.current.length - 1] ?? '';
   }
 
-  function applyLetter(pageY: number) {
-    const letter = pickLetter(pageY);
+  function applyLetter(absoluteY: number) {
+    const letter = pickLetter(absoluteY);
     if (!letter || letter === activeRef.current) return;
     activeRef.current = letter;
     setActive(letter);
     onSelectRef.current(letter);
   }
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: evt => {
-        setExpanded(true);
-        applyLetter(evt.nativeEvent.pageY);
-      },
-      onPanResponderMove: evt => {
-        applyLetter(evt.nativeEvent.pageY);
-      },
-      onPanResponderRelease: () => {
-        setExpanded(false);
-        setActive(null);
-        activeRef.current = null;
-      },
-      onPanResponderTerminate: () => {
-        setExpanded(false);
-        setActive(null);
-        activeRef.current = null;
-      },
+  const pan = Gesture.Pan()
+    .runOnJS(true)
+    .minDistance(0)
+    .onBegin(e => {
+      setExpanded(true);
+      applyLetter(e.absoluteY);
     })
-  ).current;
+    .onUpdate(e => {
+      applyLetter(e.absoluteY);
+    })
+    .onFinalize(() => {
+      setExpanded(false);
+      setActive(null);
+      activeRef.current = null;
+    });
 
   const onLayout = () => {
     containerRef.current?.measure((_x, _y, _w, h, _px, py) => {
@@ -153,26 +145,27 @@ function AlphabetScrubber({
   };
 
   return (
-    <View
-      ref={containerRef}
-      onLayout={onLayout}
-      style={[styles.scrubber, expanded && styles.scrubberExpanded, { bottom: bottomInset }]}
-      {...panResponder.panHandlers}
-    >
-      {letters.map(letter => (
-        <Text
-          key={letter}
-          style={[styles.scrubberLetter, active === letter && styles.scrubberLetterActive]}
-        >
-          {letter}
-        </Text>
-      ))}
-      {active && (
-        <View style={styles.scrubberBubble} pointerEvents="none">
-          <Text style={styles.scrubberBubbleText}>{active}</Text>
-        </View>
-      )}
-    </View>
+    <GestureDetector gesture={pan}>
+      <View
+        ref={containerRef}
+        onLayout={onLayout}
+        style={[styles.scrubber, expanded && styles.scrubberExpanded, { bottom: bottomInset }]}
+      >
+        {letters.map(letter => (
+          <Text
+            key={letter}
+            style={[styles.scrubberLetter, active === letter && styles.scrubberLetterActive]}
+          >
+            {letter}
+          </Text>
+        ))}
+        {active && (
+          <View style={styles.scrubberBubble} pointerEvents="none">
+            <Text style={styles.scrubberBubbleText}>{active}</Text>
+          </View>
+        )}
+      </View>
+    </GestureDetector>
   );
 }
 
