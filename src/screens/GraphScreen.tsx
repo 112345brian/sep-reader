@@ -8,8 +8,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { getArticleLinkGraph, getEntryPreview } from '../services/db';
-import type { GraphNode, GraphEdge } from '../services/db';
+import { getEntryPreview } from '../services/db';
+import { getArticleLinkGraph } from '../services/graphDb';
+import type { GraphNode, GraphEdge, GraphView } from '../services/graphDb';
+import { getGraph } from '../services/inpho';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -96,6 +98,40 @@ function forceLayout(
   return layout;
 }
 
+// Chronological layout for Timeline mode: x = birth year (left=earliest), nodes
+// with no date dropped into an "unknown" lane on the far left. y is staggered to
+// reduce label overlap.
+function timelineLayout(nodes: GraphNode[], width: number, height: number): LayoutNode[] {
+  const dated = nodes.filter(n => typeof n.birthYear === 'number');
+  const undatedNodes = nodes.filter(n => typeof n.birthYear !== 'number');
+  const years = dated.map(n => n.birthYear as number);
+  const minY = years.length ? Math.min(...years) : 0;
+  const maxY = years.length ? Math.max(...years) : 1;
+  const span = Math.max(1, maxY - minY);
+  const padX = 70, usableW = Math.max(1, width - padX * 2);
+  const laneH = 46;
+  const lanes = Math.max(3, Math.floor((height - 80) / laneH));
+  let i = 0;
+  const place = (n: GraphNode, x: number): LayoutNode => {
+    const lane = i++ % lanes;
+    return { ...n, x, y: 60 + lane * laneH + ((i % 2) * 14) };
+  };
+  const out: LayoutNode[] = [];
+  // Undated (incl. center if it has no year) sit in a left margin column.
+  undatedNodes.forEach(n => out.push(place(n, 30)));
+  dated
+    .sort((a, b) => (a.birthYear as number) - (b.birthYear as number))
+    .forEach(n => out.push(place(n, padX + (((n.birthYear as number) - minY) / span) * usableW)));
+  return out;
+}
+
+const KIND_COLOR: Record<string, { fill: string; stroke: string }> = {
+  entry:   { fill: '#5b8ef5', stroke: '#5b8ef5' },
+  idea:    { fill: '#1f3a36', stroke: '#3fa796' },
+  thinker: { fill: '#3a2e1a', stroke: '#c79a3f' },
+  linked:  { fill: '#26324a', stroke: '#5b8ef5' }, // neighbouring entry (Links view)
+};
+
 function IconArrowUp({ color = '#9a9a9a' }: { color?: string }) {
   return (
     <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -112,13 +148,14 @@ export default function GraphScreen() {
   const centerTitle = (route.params as any)?.centerTitle as string | undefined;
   const { width, height } = useWindowDimensions();
 
+  const [mode, setMode] = useState<GraphView>('links');
   const [nodes, setNodes] = useState<LayoutNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<{ slug: string; title: string } | null>(null);
   const [preview, setPreview] = useState<{ author: string | null; excerpt: string | null } | null>(null);
 
-  const canvasH = height - insets.top - 44 - insets.bottom;
+  const canvasH = height - insets.top - 44 - 40 - insets.bottom; // header + mode bar
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const panOffset = useRef({ x: 0, y: 0 });
@@ -142,13 +179,24 @@ export default function GraphScreen() {
   ).current;
 
   useEffect(() => {
-    getArticleLinkGraph(centerSlug ?? '').then(data => {
-      const laid = forceLayout(data.nodes, data.edges, width, canvasH, centerSlug);
+    let cancelled = false;
+    setLoading(true);
+    // 'links' is the SEP hyperlink neighbourhood (our own link index); the other
+    // modes are the InPhO semantic graph.
+    const load = mode === 'links'
+      ? getArticleLinkGraph(centerSlug ?? '')
+      : getGraph(centerSlug ?? '', mode);
+    load.then(data => {
+      if (cancelled) return;
+      const laid = mode === 'timeline'
+        ? timelineLayout(data.nodes, width, canvasH)
+        : forceLayout(data.nodes, data.edges, width, canvasH, centerSlug);
       setNodes(laid);
       setEdges(data.edges);
       setLoading(false);
     });
-  }, [width, canvasH, centerSlug]);
+    return () => { cancelled = true; };
+  }, [width, canvasH, centerSlug, mode]);
 
   const nodeMap = useMemo(
     () => new Map(nodes.map(n => [n.slug, n])),
@@ -186,6 +234,22 @@ export default function GraphScreen() {
         <View style={styles.back} />
       </View>
 
+      {/* ── View switcher (Links / Related / Timeline / Influence) ── */}
+      <View style={styles.modeBar}>
+        {(['links', 'related', 'timeline', 'influence'] as GraphView[]).map(m => (
+          <TouchableOpacity
+            key={m}
+            style={[styles.modeChip, mode === m && styles.modeChipActive]}
+            onPress={() => setMode(m)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.modeChipText, mode === m && styles.modeChipTextActive]}>
+              {m === 'links' ? 'Links' : m === 'related' ? 'Related' : m === 'timeline' ? 'Timeline' : 'Influence'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <View style={[styles.canvas, { height: canvasH }]}>
         {loading ? (
           <View style={styles.loadingWrap}>
@@ -194,9 +258,17 @@ export default function GraphScreen() {
           </View>
         ) : nodes.length === 0 ? (
           <View style={styles.loadingWrap}>
-            <Text style={styles.emptyTitle}>No links found</Text>
+            <Text style={styles.emptyTitle}>
+              {mode === 'links' ? 'No links' : mode === 'influence' ? 'No influence links' : mode === 'timeline' ? 'No dated thinkers' : 'No connections'}
+            </Text>
             <Text style={styles.emptyHint}>
-              This article has no indexed links yet.{'\n'}Try re-opening it to fetch connections.
+              {mode === 'links'
+                ? 'This article has no cross-references to other entries yet,\nor it hasn’t been cached — open it once to index its links.'
+                : mode === 'influence'
+                ? 'InPhO has no teacher/student/influence edges for this entry.'
+                : mode === 'timeline'
+                ? 'No related thinkers with recorded dates were found.'
+                : 'InPhO has no related ideas or thinkers for this entry,\nor the index is still syncing — check your connection.'}
             </Text>
           </View>
         ) : (
@@ -221,12 +293,16 @@ export default function GraphScreen() {
               })}
               {nodes.map(node => {
                 const isCenter = node.slug === centerSlug;
-                const r = isCenter ? 11 : node.read ? 7 : 4;
-                const fill = isCenter ? '#5b8ef5' : node.read ? '#1e2a4a' : '#1a1a1a';
-                const stroke = isCenter ? '#5b8ef5' : node.read ? '#3a5a8a' : '#333';
-                const label = node.title.length > 22
-                  ? node.title.slice(0, 20) + '…'
-                  : node.title;
+                const kc = KIND_COLOR[node.kind ?? 'idea'] ?? KIND_COLOR.idea;
+                const r = isCenter ? 11 : node.kind === 'thinker' ? 7 : 6;
+                const fill = isCenter ? kc.fill : kc.fill;
+                const stroke = kc.stroke;
+                // In Timeline mode every node is labelled; otherwise only center + read.
+                const showLabel = mode === 'timeline' || node.read || isCenter;
+                const yr = typeof node.birthYear === 'number'
+                  ? ` (${node.birthYear < 0 ? Math.abs(node.birthYear) + ' BCE' : node.birthYear})` : '';
+                const base = node.title.length > 22 ? node.title.slice(0, 20) + '…' : node.title;
+                const label = base + (mode === 'timeline' ? yr : '');
                 return (
                   <G
                     key={node.slug}
@@ -244,13 +320,13 @@ export default function GraphScreen() {
                       stroke={stroke}
                       strokeWidth={1.5}
                     />
-                    {(node.read || isCenter) && (
+                    {showLabel && (
                       <SvgText
                         x={node.x}
                         y={node.y + r + 12}
                         textAnchor="middle"
                         fontSize={9}
-                        fill={isCenter ? '#5b8ef5' : '#555'}
+                        fill={isCenter ? '#5b8ef5' : node.kind === 'thinker' ? '#c79a3f' : node.kind === 'linked' ? '#7da0d8' : '#3fa796'}
                       >
                         {label}
                       </SvgText>
@@ -265,16 +341,25 @@ export default function GraphScreen() {
         <View style={[styles.legend, { bottom: insets.bottom + 12 }]}>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: '#5b8ef5' }]} />
-            <Text style={styles.legendLabel}>Current</Text>
+            <Text style={styles.legendLabel}>This entry</Text>
           </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#1e2a4a', borderWidth: 1, borderColor: '#3a5a8a' }]} />
-            <Text style={styles.legendLabel}>Read</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333' }]} />
-            <Text style={styles.legendLabel}>Linked</Text>
-          </View>
+          {mode === 'links' ? (
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#26324a', borderWidth: 1, borderColor: '#5b8ef5' }]} />
+              <Text style={styles.legendLabel}>Linked entry</Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: '#1f3a36', borderWidth: 1, borderColor: '#3fa796' }]} />
+                <Text style={styles.legendLabel}>Idea</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: '#3a2e1a', borderWidth: 1, borderColor: '#c79a3f' }]} />
+                <Text style={styles.legendLabel}>Thinker</Text>
+              </View>
+            </>
+          )}
         </View>
       </View>
 
@@ -334,6 +419,26 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 14, fontWeight: '600', color: '#e4e4e4', textAlign: 'center',
   },
+
+  modeBar: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: '#111111',
+    height: 40,
+    alignItems: 'center',
+  },
+  modeChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  modeChipActive: { backgroundColor: 'rgba(91,142,245,0.14)', borderColor: 'rgba(91,142,245,0.4)' },
+  modeChipText: { color: '#777', fontSize: 12.5, fontWeight: '600' },
+  modeChipTextActive: { color: '#5b8ef5' },
 
   canvas: { flex: 1, overflow: 'hidden', position: 'relative' },
   canvasInner: { flex: 1 },
