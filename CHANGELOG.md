@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — native renderer foundation (not yet wired into the UI)
+- **Custom SEP HTML parser** (`src/utils/sepHtml/`) — tokenizes stored article HTML into a typed AST (`parse.ts` + `types.ts`) via `htmlparser2`, ahead of replacing the WebView with native React Native rendering. Handles SEP's full tag set: headings (with section ids), paragraphs, lists, definition lists, blockquotes, captioned tables, `.wl` cross-reference links, footnote refs, and inline/deprecated formatting. Nested tables flagged `unsupported` for a scoped WebView fallback. 9 unit tests.
+- **Inline TeX math tokenization** — splits `\(…\)` (inline) and `\[…\]` (display) out of text into `math` AST nodes. A full-corpus audit found 450 articles (~24%) use TeX (122,263 equations, zero MathML) — something a tag census alone would miss.
+- **Build-time math pre-render pipeline** — `scripts/renderMath.cjs` (MathJax-in-Node, `mathjax-full`) renders each unique equation to a self-contained SVG (`fill="currentColor"`, drawn natively by the existing `react-native-svg`); `scripts/buildMathSvg.cjs` dedups by content hash (3.1×). Whole-encyclopedia math = **21.3 MB gzipped**, built in ~32 s, so no math engine ships on device.
+- **Corpus audit tooling** — `scripts/auditCorpus.cjs` (sharded fetch + cache-only parse modes) validates the parser against all 1,838 articles: **0 parse exceptions**, 0 untokenized math delimiters.
+
+### Changed
+- `htmlparser2` pinned to `^9.1.0` (dual CJS/ESM) for clean Metro/Jest resolution; v12 is ESM-only.
+
+## [0.3.1] — 2026-06-23
+
+### Added
+- **GPL-3.0 license** (`LICENSE`) for the project's own source code.
+- **`NOTICE.md`** — states non-affiliation with Stanford / the Metaphysics Research Lab, records that SEP article content is fetched on-device at runtime and never bundled or redistributed, and documents the "fetch, don't bundle" design constraint.
+- **README "Licensing & content" section** — frames the app as an independent (unaffiliated, not adversarial) reader that points users back to the SEP, and pins the no-bundled-content rule.
+- **CI guard** (`.github/workflows/no-bundled-content.yml` + `scripts/check-no-bundled-content.js`) — fails the build if a tracked `.db`/`.sqlite` file or an oversized non-allowlisted asset (potential SEP article content) could ship.
+
+### Fixed
+- Corrected README/feature copy that described the injected reading styles as "SEP CSS"; the reader CSS is our own purpose-built stylesheet, not Stanford's.
+
 ## [0.3.0] — 2026-06-23
 
 ### Added

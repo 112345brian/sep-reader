@@ -1,0 +1,16 @@
+name: No bundled content
+
+# Enforces the "fetch, don't bundle" rule: the release artifact must never contain
+# Stanford Encyclopedia of Philosophy article text. See NOTICE.md.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for bundled SEP content
+        run: node scripts/check-no-bundled-content.js
