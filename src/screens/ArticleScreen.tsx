@@ -17,9 +17,10 @@ import type { RouteProp } from '@react-navigation/native';
 import {
   getEntry, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
-  getMeta, setReadProgress, getLinksTo, indexLinks,
+  getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs,
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
+import { primeBackfillForSlugs } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { SepArticle } from '../utils/sepHtml/render/SepArticle';
@@ -208,8 +209,14 @@ export default function ArticleScreen() {
     setOrphanDismissed(false);
 
     await recordRead(slug, entry.title, fromSlug);
-    // indexLinks is fire-and-forget — don't block article render
+    // Both fire-and-forget — don't block article render.
     indexLinks(slug, entry.content_html ?? '').catch(() => {});
+    // Prime InPhO date backfill: active article first, then reading history,
+    // so Timeline shows correct chronology without waiting for user to open it.
+    getRecentSlugs(10).then(recent => {
+      const rest = recent.map(r => r.slug).filter(s => s !== slug);
+      primeBackfillForSlugs([slug, ...rest]);
+    }).catch(() => {});
     const [customCss, fontSizeStr, backlinks] = await Promise.all([
       getMeta('custom_css'),
       getMeta('font_size'),
