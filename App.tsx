@@ -177,7 +177,7 @@ export default function App() {
         <NavigationContainer theme={THEME} ref={navRef}>
           <Stack.Navigator id="root" screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Home" component={HomeScreen} />
-            <Stack.Screen name="Article" component={ArticleScreen} options={{ gestureEnabled: false }} />
+            <Stack.Screen name="Article" component={ArticleScreen} />
             <Stack.Screen name="History" component={HistoryScreen} />
             <Stack.Screen name="ReadingList" component={ReadingListScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />

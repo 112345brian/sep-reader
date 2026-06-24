@@ -5,9 +5,6 @@ import {
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring, runOnJS,
-} from 'react-native-reanimated';
 import WebView from 'react-native-webview';
 import type { WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -131,10 +128,6 @@ function IconGraph({ color = '#9a9a9a' }: { color?: string }) {
 
 export default function ArticleScreen() {
   const insets = useSafeAreaInsets();
-  const screenX = useSharedValue(0);
-  const animatedScreenStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: screenX.value }],
-  }));
   const nav = useNavigation<Nav>();
   const { slug, title, fromSlug = null } = useRoute<Route>().params;
 
@@ -414,32 +407,9 @@ export default function ArticleScreen() {
   const openGraph = () =>
     nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle });
 
-  const navBack = useCallback(() => nav.goBack(), [nav]);
   const navBackTop = useCallback(() => nav.popToTop(), [nav]);
 
-  // ── Gestures (non-overlapping zones so the WebView keeps its own scroll) ──
-
-  // Swipe RIGHT anywhere in the reading area → home. Cancels if the drag is
-  // vertical-first (failOffsetY), so normal article scrolling is untouched.
-  const swipeHome = Gesture.Pan()
-    .activeOffsetX([-9999, 30])
-    .failOffsetY([-40, 40])
-    .onUpdate(e => {
-      'worklet';
-      if (e.translationX > 0) screenX.value = e.translationX;
-    })
-    .onEnd(e => {
-      'worklet';
-      if (e.translationX > 60 || e.velocityX > 300) {
-        // Reset immediately and let React Navigation drive the back transition.
-        // Springing to 500 first leaves a blank #111 frame because the native
-        // stack detaches the previous screen — nothing is rendered behind us.
-        screenX.value = withSpring(0, { damping: 30, stiffness: 400 });
-        runOnJS(navBack)();
-      } else {
-        screenX.value = withSpring(0, { damping: 22, stiffness: 260 });
-      }
-    });
+  // ── Gestures ──
 
   // Swipe DOWN on the header → graph view (mockup: "swipe down from top").
   const swipeGraph = Gesture.Pan()
@@ -460,7 +430,7 @@ export default function ArticleScreen() {
   const tocGesture = Gesture.Exclusive(tocSwipe, tocTap);
 
   return (
-    <Animated.View style={[styles.root, animatedScreenStyle]}>
+    <View style={styles.root}>
       {/* ── App bar (swipe down → graph) ── */}
       <GestureDetector gesture={swipeGraph}>
       <View style={[styles.appBar, { paddingTop: insets.top }]}>
@@ -539,8 +509,6 @@ export default function ArticleScreen() {
             />
           )}
 
-          {/* ── WebView (swipe right → home) ── */}
-          <GestureDetector gesture={swipeHome}>
           <View style={styles.webWrap}>
             {!webReady && !USE_NATIVE_RENDERER && (
               <View style={styles.webOverlay}>
@@ -604,7 +572,6 @@ export default function ArticleScreen() {
               </View>
             </GestureDetector>
           </View>
-          </GestureDetector>
 
           {/* ── TOC Sheet ── */}
           {showToc && (
@@ -639,7 +606,7 @@ export default function ArticleScreen() {
           setEditingAnnotation(null);
         }}
       />
-    </Animated.View>
+    </View>
   );
 }
 
