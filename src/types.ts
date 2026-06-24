@@ -1,6 +1,7 @@
 export interface EntryRow {
   slug: string;
   title: string;
+  parent_label: string | null;
   author: string | null;
   pub_date: string | null;
   content_hash: string | null;
@@ -14,6 +15,7 @@ export interface EntryRow {
 export interface EntrySummary {
   slug: string;
   title: string;
+  parent_label?: string | null;
   author: string | null;
   cached_at: number | null;
   read_progress?: number | null;   // 0..1 fraction read

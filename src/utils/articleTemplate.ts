@@ -5,6 +5,7 @@ import { ANNOTATION_JS } from './annotationJs';
 export interface ArticleData {
   slug: string;
   title: string;
+  parentLabel?: string | null;
   tocHtml: string;
   contentHtml: string;
   preambleHtml: string;
@@ -46,6 +47,7 @@ ${customBlock}
     ${article.tocHtml ? `<div id="toc">${article.tocHtml}</div>` : ''}
     <div id="article">
       <div id="article-content">
+        ${article.parentLabel ? `<span class="entry-breadcrumb">${escapeHtml(article.parentLabel)}</span>` : ''}
         <h1 class="pagetitle">${escapeHtml(article.title)}</h1>
         ${article.preambleHtml && !article.contentHtml.includes('id="preamble"') ? `<div id="preamble">${article.preambleHtml}</div>` : ''}
         <div id="aueditable">${article.contentHtml}</div>

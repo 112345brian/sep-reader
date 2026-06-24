@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 
@@ -30,6 +30,7 @@ export async function refreshIndexIfStale(): Promise<void> {
 
   if (entries.length > 0) {
     await upsertIndexEntries(entries);
+    await cleanDenormalizedTitles();
     await setMeta('index_refreshed_at', String(Date.now()));
     // Rebuild link index in background after new index data lands
     buildLinkIndex().catch(() => {});
@@ -130,12 +131,12 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
   }
 }
 
-async function fetchEntryList(): Promise<{ slug: string; title: string }[]> {
+async function fetchEntryList(): Promise<{ slug: string; title: string; parent_label: string | null }[]> {
   const res = await fetch(`${BASE}/contents.html`, { headers: SEP_HEADERS });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
 
-  const entries: { slug: string; title: string }[] = [];
+  const entries: { slug: string; title: string; parent_label: string | null }[] = [];
   const seen = new Set<string>();
   const STRONG_LINK = /href="entries\/([a-z0-9-]+)\/"><strong>([^<]+)<\/strong>/g;
   let m: RegExpExecArray | null;
@@ -149,20 +150,20 @@ async function fetchEntryList(): Promise<{ slug: string; title: string }[]> {
     const strongM = header.match(/<strong>([^<]+)<\/strong>/);
     const parentLabel = decodeEntities(strongM ? strongM[1].trim() : header.replace(/<[^>]*>/g, '').trim());
     if (!parentLabel) continue;
-    // If header is a linked entry, add the parent itself
+    // If header is a linked entry, add the parent itself (no parent_label — it IS the parent)
     const parentLink = header.match(/href="entries\/([a-z0-9-]+)\/"/);
     if (parentLink && !seen.has(parentLink[1])) {
       seen.add(parentLink[1]);
-      entries.push({ slug: parentLink[1], title: parentLabel });
+      entries.push({ slug: parentLink[1], title: parentLabel, parent_label: null });
     }
-    // Add sub-entries prefixed with parent label
+    // Add sub-entries: store only the sub-title as title, parent_label separately
     const subRe = /href="entries\/([a-z0-9-]+)\/"><strong>([^<]+)<\/strong>/g;
     let sub: RegExpExecArray | null;
     while ((sub = subRe.exec(subHtml)) !== null) {
       const slug = sub[1];
       if (seen.has(slug)) continue;
       seen.add(slug);
-      entries.push({ slug, title: `${parentLabel}: ${decodeEntities(sub[2].trim())}` });
+      entries.push({ slug, title: decodeEntities(sub[2].trim()), parent_label: parentLabel });
     }
   }
 
@@ -172,7 +173,7 @@ async function fetchEntryList(): Promise<{ slug: string; title: string }[]> {
     const slug = m[1];
     if (seen.has(slug)) continue;
     seen.add(slug);
-    entries.push({ slug, title: decodeEntities(m[2].trim()) });
+    entries.push({ slug, title: decodeEntities(m[2].trim()), parent_label: null });
   }
 
   entries.sort((a, b) => a.title.localeCompare(b.title));
