@@ -1,13 +1,15 @@
 import React from 'react';
 import { Text, View } from 'react-native';
+import { SvgXml } from 'react-native-svg';
 import type { Inline } from '../types';
-import { MathSvg, MathResolver } from './MathSvg';
-import { SEP_COLORS, sepText } from './theme';
+import { SEP_BASE_FONT, SEP_COLORS, sepText } from './theme';
+
+// MathJax sizes SVGs with ex:8 against em:16; reader runs at SEP_BASE_FONT px.
+const PX_PER_EX = SEP_BASE_FONT / 2;
 
 export interface InlineHandlers {
   onLinkPress?: (href: string, wl: boolean) => void;
   onFootnotePress?: (href: string, label: string) => void;
-  resolveMath: MathResolver;
 }
 
 // A character range (over the paragraph's plain text, as produced by inlineText)
@@ -24,7 +26,7 @@ const fnStyle = { color: SEP_COLORS.accent, fontSize: sepText.body.fontSize! * 0
 
 export function hasMath(inlines: Inline[]): boolean {
   for (const i of inlines) {
-    if (i.t === 'math') return true;
+    if (i.t === 'mathsvg') return true;
     if ('children' in i && Array.isArray(i.children) && hasMath(i.children)) return true;
   }
   return false;
@@ -73,9 +75,12 @@ function renderTextRuns(inlines: Inline[], h: InlineHandlers, key = 'i'): React.
         return <Text key={k} style={{ fontSize: sepText.body.fontSize! * 0.75 }}>{renderTextRuns(node.children, h, k)}</Text>;
       case 'code':
         return <Text key={k} style={{ fontFamily: 'monospace', color: SEP_COLORS.textBright }}>{node.v}</Text>;
-      case 'math':
-        // shouldn't reach here on the fast path; render TeX as a safety net.
-        return <Text key={k} style={{ fontFamily: 'monospace' }}>{node.tex}</Text>;
+      case 'mathsvg': {
+        const pw = Math.max(1, Math.round(node.w * PX_PER_EX));
+        const ph = Math.max(1, Math.round(node.h * PX_PER_EX));
+        return <SvgXml key={k} xml={node.svg} width={pw} height={ph} color={SEP_COLORS.text}
+          style={node.display ? undefined : { transform: [{ translateY: Math.round(ph * 0.18) }] }} />;
+      }
       default:
         return null;
     }
@@ -176,9 +181,12 @@ function renderHighlightedRuns(
 // so the common case keeps the fast single-<Text> path.
 function flattenToTokens(inlines: Inline[], h: InlineHandlers, style: object, out: React.ReactNode[], keyRef: { n: number }) {
   for (const node of inlines) {
-    if (node.t === 'math') {
+    if (node.t === 'mathsvg') {
       if (node.display) continue; // display math handled at block level
-      out.push(<MathSvg key={`m${keyRef.n++}`} tex={node.tex} display={false} resolve={h.resolveMath} />);
+      const w = Math.max(1, Math.round(node.w * PX_PER_EX));
+      const hh = Math.max(1, Math.round(node.h * PX_PER_EX));
+      out.push(<SvgXml key={`m${keyRef.n++}`} xml={node.svg} width={w} height={hh} color={SEP_COLORS.text}
+        style={{ transform: [{ translateY: Math.round(hh * 0.18) }] }} />);
     } else if (node.t === 'text') {
       // split into words; spaces become natural wrap points
       for (const word of node.v.split(/(\s+)/)) {

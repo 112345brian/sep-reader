@@ -64,24 +64,22 @@ function trimInlineEdges(inlines: Inline[]): Inline[] {
   return inlines.slice(s, e + 1);
 }
 
-// Split a text run into text + TeX-math nodes. SEP delimits inline math with
-// \(…\) and display math with \[…\]; the closing \) / \] delimiters are
-// unambiguous (a literal ) or ] in TeX is not backslash-escaped), so a
-// non-greedy scan is safe. Unbalanced delimiters (no close in this text node)
-// simply stay as text rather than swallowing the rest.
-const MATH_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g;
-function splitMath(text: string): Inline[] {
+// Legacy fallback: articles not yet backfilled still have raw \(…\) / \[…\]
+// in their content_html. Wrap them in a code node (monospace) rather than
+// showing the \( \) punctuation as plain text. New articles have these
+// replaced with <math-i> tags at fetch time and never hit this path.
+const MATH_LEGACY_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g;
+function splitTextLegacy(text: string): Inline[] {
   if (text.indexOf('\\(') === -1 && text.indexOf('\\[') === -1) {
     return [{ t: 'text', v: text }];
   }
   const out: Inline[] = [];
   let last = 0;
+  MATH_LEGACY_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
-  MATH_RE.lastIndex = 0;
-  while ((m = MATH_RE.exec(text)) !== null) {
+  while ((m = MATH_LEGACY_RE.exec(text)) !== null) {
     if (m.index > last) out.push({ t: 'text', v: text.slice(last, m.index) });
-    if (m[1] !== undefined) out.push({ t: 'math', tex: m[1].trim(), display: false });
-    else out.push({ t: 'math', tex: m[2].trim(), display: true });
+    out.push({ t: 'code', v: (m[1] ?? m[2]).trim() });
     last = m.index + m[0].length;
   }
   if (last < text.length) out.push({ t: 'text', v: text.slice(last) });
@@ -93,7 +91,7 @@ function parseInlines(nodes: DomNode[]): Inline[] {
   for (const n of nodes) {
     if (n.type === 'text') {
       // Collapse whitespace the way browsers do: runs of \n/\t/spaces → single space.
-      if (n.data) out.push(...splitMath(n.data.replace(/\s+/g, ' ')));
+      if (n.data) out.push(...splitTextLegacy(n.data.replace(/\s+/g, ' ')));
       continue;
     }
     if (!isTag(n) || !n.name) continue;
@@ -160,6 +158,17 @@ function parseInlines(nodes: DomNode[]): Inline[] {
       case 'br':
         out.push({ t: 'text', v: '\n' });
         break;
+      case 'math-i': {
+        // Pre-rendered math SVG, stored as base64 in the element's text content.
+        const b64 = textOf(n);
+        if (!b64) break;
+        const svg = atob(b64);
+        const display = n.attribs?.d === '1';
+        const w = parseFloat(n.attribs?.w ?? '1') || 1;
+        const h = parseFloat(n.attribs?.h ?? '1') || 1;
+        out.push({ t: 'mathsvg', svg, w, h, display });
+        break;
+      }
       case 'span':
         // Spans are presentational in SEP; flatten their children.
         out.push(...parseInlines(kids));

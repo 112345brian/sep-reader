@@ -194,23 +194,6 @@ export async function putMath(
   );
 }
 
-// Batch-insert pre-rendered equations in a single transaction. Used by the
-// fetch pipeline to pre-render all math in an article at cache time so the
-// reader never pays the synchronous MathJax cost on first open.
-export async function putMathBatch(
-  rows: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }>
-): Promise<void> {
-  if (!rows.length) return;
-  const db = await getDb();
-  await db.withTransactionAsync(async () => {
-    for (const r of rows) {
-      await db.runAsync(
-        'INSERT OR IGNORE INTO math (hash, svg, w, h, d) VALUES (?, ?, ?, ?, ?)',
-        [r.hash, r.svg, r.w, r.h, r.display ? 1 : 0]
-      );
-    }
-  });
-}
 
 export async function upsertIndexEntries(
   entries: { slug: string; title: string; parent_label?: string | null }[]
@@ -230,14 +213,20 @@ export async function upsertIndexEntries(
   });
 }
 
-// Return content_html for all cached articles with has_math=1 that still need
-// math pre-rendering. Used by the startup backfill in catalog.ts.
+// Return content_html for all cached math articles. Used by the startup
+// backfill in catalog.ts to substitute raw TeX with pre-rendered SVGs.
 export async function getMathArticleHtml(): Promise<Array<{ slug: string; content_html: string }>> {
   const db = await getDb();
   const rows = await db.getAllAsync<{ slug: string; content_html: string }>(
     `SELECT slug, content_html FROM entries WHERE has_math = 1 AND content_html IS NOT NULL`
   );
   return rows;
+}
+
+// Overwrite content_html for a single entry. Used by backfillMathInline.
+export async function updateArticleHtml(slug: string, html: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`UPDATE entries SET content_html = ? WHERE slug = ?`, [html, slug]);
 }
 
 export async function cacheArticle(

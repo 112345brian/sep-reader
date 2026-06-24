@@ -1,51 +1,62 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, putMathBatch, getMathArticleHtml } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
-import { parseSepHtml } from '../utils/sepHtml/parse';
-import { collectMathNodes, mathHash } from '../utils/sepHtml/render/mathStore';
 import { texToSvg } from '../utils/sepHtml/render/texToSvg';
 
-// Render all math equations in a fetched article to SVG and store in the local
-// DB. Fire-and-forget from fetchAndCacheArticle so first open is fast: by the
-// time the user taps through, hydrateMath loads all SVGs from DB into the
-// in-memory cache and resolveMath never calls MathJax during render.
-// Yields every 10 equations so the JS thread stays responsive during bulk download.
-async function prerenderMath(contentHtml: string): Promise<void> {
-  const parsed = parseSepHtml(contentHtml);
-  const nodes = collectMathNodes(parsed.blocks);
-  if (!nodes.length) return;
-
-  const seen = new Set<string>();
-  const toStore: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }> = [];
-
-  for (let i = 0; i < nodes.length; i++) {
-    if (i > 0 && i % 10 === 0) await new Promise<void>(r => setTimeout(r, 0));
-    const { tex, display } = nodes[i];
-    const key = mathHash(tex, display);
-    if (seen.has(key)) continue;
-    seen.add(key);
+// Replace all \(…\) and \[…\] TeX math in the raw HTML with <math-i> elements
+// whose text content is the base64-encoded pre-rendered SVG. The parser decodes
+// and emits these as `mathsvg` AST nodes — MathJax never runs at read time.
+// Yields every 10 equations during bulk download to stay off the critical path.
+const MATH_SUBST_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g;
+async function substitutemath(html: string): Promise<string> {
+  const matches: Array<{ index: number; len: number; tag: string }> = [];
+  MATH_SUBST_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  let n = 0;
+  while ((m = MATH_SUBST_RE.exec(html)) !== null) {
+    if (n > 0 && n % 10 === 0) await new Promise<void>(r => setTimeout(r, 0));
+    n++;
+    const inline = m[1];
+    const block = m[2];
+    const tex = decodeEntities((inline ?? block).trim());
+    const display = block !== undefined;
     const result = texToSvg(tex, display);
-    if (!('error' in result)) {
-      toStore.push({ hash: key, svg: result.svg, w: result.width ?? 1, h: result.height ?? 1, display });
-    }
+    if ('error' in result) continue; // leave failures as raw TeX
+    const b64 = btoa(result.svg);
+    const w = (result.width ?? 1).toFixed(4);
+    const h = (result.height ?? 1).toFixed(4);
+    const d = display ? '1' : '0';
+    matches.push({ index: m.index, len: m[0].length, tag: `<math-i d="${d}" w="${w}" h="${h}">${b64}</math-i>` });
   }
-
-  await putMathBatch(toStore);
+  if (!matches.length) return html;
+  // Splice in reverse so indices stay valid.
+  let out = html;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const { index, len, tag } = matches[i];
+    out = out.slice(0, index) + tag + out.slice(index + len);
+  }
+  return out;
 }
 
-// One-time startup backfill: render math for all already-cached articles that
-// pre-date the prerenderMath pipeline. Runs in background, yields between
-// articles and between equation batches to stay off the critical UI path.
-// Guarded by a meta key so it only runs once per device.
-export async function backfillMathCache(): Promise<void> {
-  const done = await getMeta('math_prerender_v1');
+// One-time startup backfill: run substitutemath on all already-cached math
+// articles so their stored content_html has SVGs instead of raw TeX.
+// Runs entirely from the local DB — no network. Guarded by a meta key.
+export async function backfillMathInline(): Promise<void> {
+  const done = await getMeta('math_inline_v1');
   if (done) return;
   const articles = await getMathArticleHtml();
-  for (let i = 0; i < articles.length; i++) {
-    await new Promise<void>(r => setTimeout(r, 0)); // yield between articles
-    await prerenderMath(articles[i].content_html).catch(() => {});
+  for (const article of articles) {
+    await new Promise<void>(r => setTimeout(r, 0));
+    try {
+      const updated = await substitutemath(article.content_html);
+      if (updated !== article.content_html) {
+        await updateArticleHtml(article.slug, updated);
+      }
+    } catch {
+      // non-fatal — article will fall back to legacy monospace TeX
+    }
   }
-  await setMeta('math_prerender_v1', '1');
+  await setMeta('math_inline_v1', '1');
 }
 
 const BASE = 'https://plato.stanford.edu';
@@ -164,20 +175,19 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
     const contentHtml = rawContentHtml.replace(/^\s*<!--[^>]*-->\s*/, '').replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '');
 
     const linkedHtml = linkifyHtml(contentHtml);
+    const hasMath = linkedHtml.includes('\\(') || linkedHtml.includes('\\[');
+    // Substitute math before storing so content_html is always SVG-ready.
+    const finalHtml = hasMath ? await substitutemath(linkedHtml) : linkedHtml;
     await cacheArticle(slug, {
       author: extractMetaContent(html, 'citation_author') ?? extractAuthor(html),
       pub_date: extractMetaContent(html, 'citation_publication_date'),
       toc_html: tocHtml,
       preamble_html: preambleHtml,
-      content_html: linkedHtml,
-      has_math: linkedHtml.includes('\\(') || linkedHtml.includes('\\[') ? 1 : 0,
+      content_html: finalHtml,
+      has_math: hasMath ? 1 : 0,
     });
     // Index outgoing links for graph view
     indexLinks(slug, contentHtml).catch(() => {});
-    // Pre-render math to SVG so first open never pays the synchronous MathJax cost
-    if (linkedHtml.includes('\\(') || linkedHtml.includes('\\[')) {
-      prerenderMath(linkedHtml).catch(() => {});
-    }
     return true;
   } catch {
     return false;

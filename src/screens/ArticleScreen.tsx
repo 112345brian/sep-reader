@@ -22,7 +22,6 @@ import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { SepArticle, type SepArticleHandle } from '../utils/sepHtml/render/SepArticle';
 import { InlineContent } from '../utils/sepHtml/render/Inline';
-import { resolveMath, hydrateMath, collectMathNodes } from '../utils/sepHtml/render/mathStore';
 import type { Inline } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet from '../components/TocSheet';
@@ -161,9 +160,8 @@ export default function ArticleScreen() {
   const [footnote, setFootnote] = useState<{ inlines: Inline[] } | null>(null);
   const [backlinkCount, setBacklinkCount] = useState(0);
 
-  // Native-renderer AST — deferred past the navigation animation, with math
-  // warmed from DB *before* setNativeArticle so the render never calls MathJax
-  // synchronously (all equations are cache hits in the in-memory map).
+  // Native-renderer AST — deferred past the navigation animation. SVGs are
+  // already baked into content_html at fetch time, so parse is pure and fast.
   const [nativeArticle, setNativeArticle] = useState<ReturnType<typeof parseSepHtml> | null>(null);
   const readyContentHtml = state.phase === 'ready' ? state.entry.content_html : null;
   useEffect(() => {
@@ -174,15 +172,7 @@ export default function ArticleScreen() {
     const html = state.entry.content_html ?? '';
     let cancelled = false;
     const task = InteractionManager.runAfterInteractions(() => {
-      const parsed = parseSepHtml(html);
-      const nodes = collectMathNodes(parsed.blocks);
-      if (!nodes.length) {
-        if (!cancelled) setNativeArticle(parsed);
-        return;
-      }
-      hydrateMath(nodes)
-        .catch(() => {})
-        .then(() => { if (!cancelled) setNativeArticle(parsed); });
+      if (!cancelled) setNativeArticle(parseSepHtml(html));
     });
     return () => { cancelled = true; task.cancel(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -540,7 +530,6 @@ export default function ArticleScreen() {
               <SepArticle
                 ref={nativeArticleRef}
                 article={nativeArticle}
-                resolveMath={resolveMath}
                 onLinkPress={handleNativeLink}
                 onFootnotePress={(fnHref) => {
                   const id = fnHref.startsWith('#') ? fnHref.slice(1) : fnHref;
@@ -620,7 +609,7 @@ export default function ArticleScreen() {
           <View style={[styles.fnSheet, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.fnHandle} />
             <Text style={styles.fnLabel}>NOTE</Text>
-            <InlineContent inlines={footnote.inlines} handlers={{ resolveMath }} baseStyle={styles.fnText} />
+            <InlineContent inlines={footnote.inlines} handlers={{}} baseStyle={styles.fnText} />
           </View>
         </Pressable>
       )}

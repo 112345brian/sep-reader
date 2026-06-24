@@ -2,23 +2,18 @@ import React, { useState } from 'react';
 import { Text, View, Image, Pressable, type LayoutChangeEvent } from 'react-native';
 import type { Block, Inline } from '../types';
 import type { Annotation } from '../../../types';
+import { SvgXml } from 'react-native-svg';
 import { InlineContent, InlineHandlers, hasMath, type Highlight } from './Inline';
-import { MathSvg } from './MathSvg';
-import { SEP_COLORS, sepBlock, sepText } from './theme';
+import { SEP_BASE_FONT, SEP_COLORS, sepBlock, sepText } from './theme';
+
+const PX_PER_EX = SEP_BASE_FONT / 2;
 
 export interface BlockHandlers extends InlineHandlers {
   onHeadingLayout?: (id: string, y: number) => void;
-  // Fallback for `unsupported` blocks (nested tables, animated SVG). The screen
-  // supplies a scoped WebView; if absent we show a quiet placeholder.
   renderFallback?: (html: string) => React.ReactNode;
-  // Resolve a relative image src to an absolute URI. Return null to skip the image.
   resolveImageSrc?: (src: string) => string | null;
-  // Annotations to highlight. Painted on the exact matched span within a
-  // paragraph (no-math fast path), or as a whole-paragraph left border on
-  // math paragraphs where character offsets can't be mapped.
   annotations?: Annotation[];
   onAnnotationPress?: (ann: Annotation) => void;
-  // Long-press on a paragraph triggers this with its plain text.
   onAnnotationCreate?: (text: string) => void;
 }
 
@@ -138,9 +133,9 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
         ? (h.annotations ?? []).find(a => a.selected_text && a.selected_text.trim() && paraText.includes(a.selected_text))
         : undefined;
 
-      // Display math (\[…\]) parses as an inline node but renders as a centered
-      // block, so split the paragraph around any display-math nodes.
-      const hasDisplay = block.children.some(c => c.t === 'math' && c.display);
+      // Display math parses as an inline node but renders as a centered block,
+      // so split the paragraph around any display mathsvg nodes.
+      const hasDisplay = block.children.some(c => c.t === 'mathsvg' && c.display);
       let inner: React.ReactNode;
       if (!hasDisplay) {
         inner = <InlineContent inlines={block.children} handlers={h} highlights={highlights} />;
@@ -151,9 +146,15 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
           if (run.length) { segments.push(<InlineContent key={key} inlines={run} handlers={h} />); run = []; }
         };
         block.children.forEach((c, i) => {
-          if (c.t === 'math' && c.display) {
+          if (c.t === 'mathsvg' && c.display) {
             flush(`r${i}`);
-            segments.push(<MathSvg key={`dm${i}`} tex={c.tex} display resolve={h.resolveMath} />);
+            const w = Math.max(1, Math.round(c.w * PX_PER_EX));
+            const mh = Math.max(1, Math.round(c.h * PX_PER_EX));
+            segments.push(
+              <View key={`dm${i}`} style={{ alignItems: 'center', width: '100%', marginVertical: 14 }}>
+                <SvgXml xml={c.svg} width={w} height={mh} color={SEP_COLORS.text} />
+              </View>
+            );
           } else {
             run.push(c);
           }

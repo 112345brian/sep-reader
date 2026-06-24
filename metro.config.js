@@ -1,12 +1,15 @@
-const { getDefaultConfig } = require('expo/metro-config');
-const { mergeConfig } = require('@react-native/metro-config');
+const { getDefaultConfig } = require('/Users/bri/programming/sep-reader/node_modules/expo/metro-config');
+const path = require('path');
 
-/**
- * Metro configuration
- * https://reactnative.dev/docs/metro
- *
- * @type {import('@react-native/metro-config').MetroConfig}
- */
-const config = {};
+const repoRoot = path.resolve(__dirname, '../../..');
 
-module.exports = mergeConfig(getDefaultConfig(__dirname), config);
+const defaultConfig = getDefaultConfig(__dirname);
+
+module.exports = {
+  ...defaultConfig,
+  watchFolders: [repoRoot],
+  resolver: {
+    ...defaultConfig.resolver,
+    nodeModulesPaths: [path.join(repoRoot, 'node_modules')],
+  },
+};

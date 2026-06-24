@@ -49,18 +49,28 @@ describe('parseSepHtml', () => {
     expect(links.find(l => l.href === 'http://x')!.wl).toBe(false);
   });
 
-  it('tokenizes inline and display TeX out of text', () => {
-    const html = `<div id="main-text"><p>Let \\(A \\subseteq B\\) and then \\[ x = y^2 \\] follows.</p></div>`;
-    const math = allInlines(parseSepHtml(html).blocks).filter(i => i.t === 'math') as Extract<Inline, { t: 'math' }>[];
-    expect(math).toHaveLength(2);
-    expect(math[0]).toMatchObject({ tex: 'A \\subseteq B', display: false });
-    expect(math[1]).toMatchObject({ tex: 'x = y^2', display: true });
+  it('parses <math-i> elements into mathsvg inline nodes', () => {
+    // A minimal SVG encoded as base64 (atob/btoa are available in Node 16+)
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect/></svg>';
+    const b64 = btoa(svg);
+    const html = `<div id="main-text"><p>Let <math-i d="0" w="1.5" h="1.0">${b64}</math-i> follow.</p></div>`;
+    const mathNodes = allInlines(parseSepHtml(html).blocks).filter(i => i.t === 'mathsvg') as Extract<Inline, { t: 'mathsvg' }>[];
+    expect(mathNodes).toHaveLength(1);
+    expect(mathNodes[0]).toMatchObject({ display: false, w: 1.5, h: 1.0 });
+    expect(mathNodes[0].svg).toBe(svg);
   });
 
-  it('leaves an unbalanced delimiter as text rather than swallowing', () => {
+  it('legacy: raw TeX delimiters in text become code nodes (legacy fallback)', () => {
+    const html = `<div id="main-text"><p>Let \\(A \\subseteq B\\) hold.</p></div>`;
+    const inl = allInlines(parseSepHtml(html).blocks);
+    expect(inl.some(i => i.t === 'code' && i.v.includes('A \\subseteq B'))).toBe(true);
+    expect(inl.some(i => i.t === 'mathsvg')).toBe(false);
+  });
+
+  it('leaves an unbalanced TeX delimiter as plain text', () => {
     const html = `<div id="main-text"><p>a price of \\(10 with no close</p></div>`;
     const inl = allInlines(parseSepHtml(html).blocks);
-    expect(inl.some(i => i.t === 'math')).toBe(false);
+    expect(inl.some(i => i.t === 'mathsvg')).toBe(false);
     expect(inl.some(i => i.t === 'text' && i.v.includes('\\(10'))).toBe(true);
   });
 

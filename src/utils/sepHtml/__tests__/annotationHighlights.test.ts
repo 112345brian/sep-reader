@@ -10,7 +10,6 @@ const ann = (partial: Partial<Annotation> & { selected_text: string }): Annotati
 
 const handlers = (annotations: Annotation[]): BlockHandlers => ({
   annotations,
-  resolveMath: () => null,
 });
 
 describe('annotationHighlights', () => {

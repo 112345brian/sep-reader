@@ -7,12 +7,6 @@
 // falls back, which texToSvg models explicitly.
 
 import { texToSvg, mathEngineUnavailable } from '../texToSvg';
-import { mathHash, resolveMath, _clearMathCache } from '../mathStore';
-
-jest.mock('../../../../services/db', () => ({
-  getMathByHashes: jest.fn(async () => []),
-  putMath: jest.fn(async () => {}),
-}));
 
 describe('texToSvg (on-device renderer)', () => {
   it('renders inline TeX to a self-contained SVG', () => {
@@ -41,21 +35,3 @@ describe('texToSvg (on-device renderer)', () => {
   });
 });
 
-describe('mathStore', () => {
-  beforeEach(() => _clearMathCache());
-
-  it('hashes inline and display variants distinctly', () => {
-    expect(mathHash('x', false)).not.toBe(mathHash('x', true));
-  });
-
-  it('resolves and memoizes (second call is the same object)', () => {
-    const a = resolveMath('\\alpha', false);
-    const b = resolveMath('\\alpha', false);
-    expect(a).not.toBeNull();
-    expect(a).toBe(b); // memoized identity
-  });
-
-  it('returns null for an un-renderable equation', () => {
-    expect(resolveMath('\\bad{', false)).toBeNull();
-  });
-});

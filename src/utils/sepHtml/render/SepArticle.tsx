@@ -4,12 +4,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ParsedArticle } from '../types';
 import type { Annotation } from '../../../types';
 import { Blocks, BlockHandlers } from './Blocks';
-import { MathResolver } from './MathSvg';
 import { SEP_COLORS, SEP_SIDE_PAD } from './theme';
 
 export interface SepArticleProps {
   article: ParsedArticle;
-  resolveMath: MathResolver;
   onLinkPress?: (href: string, wl: boolean) => void;
   onFootnotePress?: (href: string, label: string) => void;
   // Reading progress 0..1, throttled to ~2% steps (matches the WebView path).
@@ -31,7 +29,7 @@ export interface SepArticleHandle {
 }
 
 export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(function SepArticle({
-  article, resolveMath, onLinkPress, onFootnotePress, onProgress, onActiveSection, renderFallback,
+  article, onLinkPress, onFootnotePress, onProgress, onActiveSection, renderFallback,
   resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, footer,
 }, ref) {
   const { bottom: bottomInset } = useSafeAreaInsets();
@@ -77,7 +75,6 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
   }));
 
   const handlers: BlockHandlers = {
-    resolveMath,
     onLinkPress,
     onFootnotePress,
     onHeadingLayout,

@@ -15,11 +15,10 @@ export type Inline =
   | { t: 'sup'; children: Inline[] }
   | { t: 'sub'; children: Inline[] }
   | { t: 'code'; v: string }
-  // TeX math extracted from text (\(…\) inline, \[…\] display). 450 SEP
-  // articles use this; `tex` is the raw source, rendered to SVG on-device at
-  // first encounter and cached (mathStore). `display` marks block-style
-  // (centered, own line) vs inline.
-  | { t: 'math'; tex: string; display: boolean };
+  // Pre-rendered math SVG, substituted into content_html at fetch time.
+  // `display` marks block-style (centered, own line) vs inline.
+  // `w` and `h` are MathJax ex-unit dimensions.
+  | { t: 'mathsvg'; svg: string; w: number; h: number; display: boolean };
 
 export interface TableRow {
   header: boolean;
