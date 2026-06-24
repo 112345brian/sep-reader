@@ -66,7 +66,8 @@ function parseInlines(nodes: DomNode[]): Inline[] {
   const out: Inline[] = [];
   for (const n of nodes) {
     if (n.type === 'text') {
-      if (n.data) out.push(...splitMath(n.data));
+      // Collapse whitespace the way browsers do: runs of \n/\t/spaces → single space.
+      if (n.data) out.push(...splitMath(n.data.replace(/\s+/g, ' ')));
       continue;
     }
     if (!isTag(n) || !n.name) continue;
