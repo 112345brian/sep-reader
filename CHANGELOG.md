@@ -4,6 +4,7 @@
 
 ### Fixed
 - **Swipe-right to go back** — gesture now reliably navigates back. Disabled the native stack's competing iOS back-swipe gesture (`gestureEnabled: false` on Article screen) and loosened the trigger condition so a moderate drag (60 px) or fast flick (300 px/s) commits, rather than requiring both simultaneously.
+- **Cross-article links opening Safari** — the WebView `baseUrl` was set to `https://plato.stanford.edu` (root), so relative links in cached article HTML (e.g. `../other-article/`) resolved to `/other-article/` instead of `/entries/other-article/`. They missed the intercept regex and fell through to `Linking.openURL`. Fixed by setting `baseUrl` to `https://plato.stanford.edu/entries/<slug>/`, matching the original page location.
 
 ## [0.4.1] — 2026-06-23
 

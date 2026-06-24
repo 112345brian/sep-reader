@@ -519,7 +519,7 @@ export default function ArticleScreen() {
             ) : (
             <WebView
               ref={webRef}
-              source={{ html: state.html, baseUrl: SEP_BASE }}
+              source={{ html: state.html, baseUrl: `${SEP_BASE}/entries/${slug}/` }}
               style={styles.web}
               originWhitelist={['*']}
               onShouldStartLoadWithRequest={handleNav}
