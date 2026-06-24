@@ -8,9 +8,7 @@ const NOTIF_ID = 'nous-download-progress';
 const UPDATE_INTERVAL_MS = 4000;
 const UPDATE_INTERVAL_ARTICLES = 25;
 
-let lastUpdateTime = 0;
-let lastUpdateDone = -1;
-let permissionGranted = false;
+let state = { lastUpdateTime: 0, lastUpdateDone: -1, permissionGranted: false };
 
 async function ensureChannel() {
   if (Platform.OS !== 'android') return;
@@ -28,11 +26,8 @@ export async function startDownloadNotification(): Promise<void> {
     const { status } = await Notifications.requestPermissionsAsync({
       ios: { allowAlert: true, allowBadge: false, allowSound: false },
     });
-    permissionGranted = status === 'granted';
-    if (!permissionGranted) return;
-
-    lastUpdateTime = 0;
-    lastUpdateDone = -1;
+    state = { lastUpdateTime: 0, lastUpdateDone: -1, permissionGranted: status === 'granted' };
+    if (!state.permissionGranted) return;
 
     await Notifications.scheduleNotificationAsync({
       identifier: NOTIF_ID,
@@ -56,12 +51,12 @@ async function isNotificationPresent(): Promise<boolean> {
 }
 
 export async function updateDownloadNotification(done: number, total: number): Promise<void> {
-  if (!permissionGranted) return;
+  if (!state.permissionGranted) return;
   const now = Date.now();
-  const articlesDelta = done - lastUpdateDone;
-  if (articlesDelta < UPDATE_INTERVAL_ARTICLES && now - lastUpdateTime < UPDATE_INTERVAL_MS) return;
-  lastUpdateDone = done;
-  lastUpdateTime = now;
+  const articlesDelta = done - state.lastUpdateDone;
+  if (articlesDelta < UPDATE_INTERVAL_ARTICLES && now - state.lastUpdateTime < UPDATE_INTERVAL_MS) return;
+  state.lastUpdateDone = done;
+  state.lastUpdateTime = now;
   try {
     // Don't re-show if the user dismissed it.
     if (!await isNotificationPresent()) return;
@@ -85,7 +80,7 @@ export async function updateDownloadNotification(done: number, total: number): P
 }
 
 export async function finishDownloadNotification(total: number): Promise<void> {
-  if (!permissionGranted) return;
+  if (!state.permissionGranted) return;
   try {
     // Same dismiss-then-repost pattern as updateDownloadNotification: on iOS,
     // trigger:null notifications with the same identifier stack rather than replace.

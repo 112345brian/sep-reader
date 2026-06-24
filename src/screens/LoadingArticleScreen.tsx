@@ -10,7 +10,7 @@ import { parseSepHtml } from '../utils/sepHtml/parse';
 import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';
 import { ArticleHeader } from '../utils/sepHtml/render/ArticleHeader';
 import { BlockView } from '../utils/sepHtml/render/Blocks';
-import { SEP_COLORS, SEP_SIDE_PAD } from '../utils/sepHtml/render/theme';
+import { APP_ACCENT, SEP_COLORS, SEP_SIDE_PAD } from '../utils/sepHtml/render/theme';
 import type { Block } from '../utils/sepHtml/types';
 
 interface Props {
@@ -199,7 +199,7 @@ const s = StyleSheet.create({
     // No bottom padding — loading bar (data[0]) sits flush below.
   },
   logo: {
-    color: '#7ba4ff',
+    color: APP_ACCENT,
     fontSize: 22,
     fontWeight: '400',
     letterSpacing: 6,
@@ -227,7 +227,7 @@ const s = StyleSheet.create({
   fill: {
     height: '100%',
     borderRadius: 1,
-    backgroundColor: '#7ba4ff',
+    backgroundColor: APP_ACCENT,
   },
   barLabel: {
     color: '#555',
@@ -255,7 +255,7 @@ const s = StyleSheet.create({
     gap: 4,
   },
   hintArrow: {
-    color: '#7ba4ff',
+    color: APP_ACCENT,
     fontSize: 18,
   },
   hintTitle: {

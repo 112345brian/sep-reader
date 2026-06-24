@@ -8,6 +8,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { getEntry, getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services/db';
+import { APP_ACCENT } from './src/utils/sepHtml/render/theme';
 import { syncOnLaunch } from './src/services/dataSync';
 import { importSeedFromUrl } from './src/services/seedImport';
 import type { SeedPhase } from './src/services/seedImport';
@@ -27,7 +28,7 @@ import GraphScreen from './src/screens/GraphScreen';
 import LoadingArticleScreen from './src/screens/LoadingArticleScreen';
 import { startDownloadNotification, updateDownloadNotification, finishDownloadNotification } from './src/services/downloadNotification';
 
-const PRIORITY_ARTICLE_SLUG = 'neoplatonism';
+const FALLBACK_ARTICLE_SLUG = 'neoplatonism';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -62,12 +63,12 @@ const barStyles = StyleSheet.create({
 const THEME = {
   dark: true,
   colors: {
-    primary: '#7ba4ff',
+    primary: APP_ACCENT,
     background: '#121212',
     card: '#121212',
     text: '#e8e8e8',
     border: '#2a2a2a',
-    notification: '#7ba4ff',
+    notification: APP_ACCENT,
   },
   fonts: {
     regular: { fontFamily: 'System', fontWeight: '400' as const },
@@ -95,7 +96,7 @@ export default function App() {
   const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
   useEffect(() => {
-    boot();
+    boot().catch(() => setPhase('index_error'));
   }, []);
 
   async function boot() {
@@ -114,14 +115,16 @@ export default function App() {
     // Only for SEP-scoped libraries; skip for OWL-only users (neoplatonism is SEP content).
     // Check the cache first — if already present, skip the network round-trip.
     if (prefs.libraryScope !== 'owl') {
-      getEntry(PRIORITY_ARTICLE_SLUG)
-        .then(existing => {
-          if (existing?.content_html) { setPriorityArticle(existing); return; }
-          return fetchAndCacheArticle(PRIORITY_ARTICLE_SLUG)
-            .then(() => getEntry(PRIORITY_ARTICLE_SLUG))
-            .then(entry => { if (entry) setPriorityArticle(entry); });
-        })
-        .catch(() => {});
+      getRecentSlugs(1).then(recent => {
+        const slug = recent[0]?.slug ?? FALLBACK_ARTICLE_SLUG;
+        return getEntry(slug)
+          .then(existing => {
+            if (existing?.content_html) { setPriorityArticle(existing); return; }
+            return fetchAndCacheArticle(slug)
+              .then(() => getEntry(slug))
+              .then(entry => { if (entry) setPriorityArticle(entry); });
+          });
+      }).catch(() => {});
     }
 
     const count = await getEntryCount();
@@ -232,7 +235,7 @@ export default function App() {
             </>
           ) : (
             <>
-              <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
+              <ActivityIndicator color={APP_ACCENT} style={{ marginTop: 32 }} />
               <Text style={styles.bootLabel}>
                 {seedPhase?.phase === 'validating' ? 'Validating…' : 'Installing…'}
               </Text>
@@ -305,7 +308,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bootLogo: {
-    color: '#7ba4ff',
+    color: APP_ACCENT,
     fontSize: 22,
     fontWeight: '400',
     letterSpacing: 6,
@@ -333,7 +336,7 @@ const styles = StyleSheet.create({
   bootProgressFill: {
     height: '100%',
     borderRadius: 1,
-    backgroundColor: '#7ba4ff',
+    backgroundColor: APP_ACCENT,
   },
 });
 
