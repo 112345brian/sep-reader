@@ -33,6 +33,12 @@ const codeStyle = {
   color: SEP_COLORS.textBright,
   backgroundColor: SEP_COLORS.bgRaised,
 };
+const strongStyle = { fontWeight: '700' as const, color: SEP_COLORS.textBright };
+const emStyle = { fontStyle: 'italic' as const };
+const scriptStyle = { fontSize: sepText.body.fontSize! * 0.75 };
+const smallStyle = { fontSize: sepText.body.fontSize! * 0.85 };
+const underlineStyle = { textDecorationLine: 'underline' as const };
+const strikeStyle = { textDecorationLine: 'line-through' as const };
 
 export function hasMath(inlines: Inline[]): boolean {
   for (const i of inlines) {
@@ -63,19 +69,17 @@ function renderTextRuns(inlines: Inline[], h: InlineHandlers, key = 'i'): React.
         return <Text key={k}>{node.v}</Text>;
       case 'em':
         return (
-          <Text key={k} style={node.kind === 'strong'
-            ? { fontWeight: '700', color: SEP_COLORS.textBright }
-            : { fontStyle: 'italic' }}>
+          <Text key={k} style={node.kind === 'strong' ? strongStyle : emStyle}>
             {renderTextRuns(node.children, h, k)}
           </Text>
         );
       case 'styled': {
-        const s = node.style === 'underline' ? { textDecorationLine: 'underline' as const }
-          : node.style === 'strike' ? { textDecorationLine: 'line-through' as const }
-          : node.style === 'small' ? { fontSize: sepText.body.fontSize! * 0.85 }
+        const s = node.style === 'underline' ? underlineStyle
+          : node.style === 'strike' ? strikeStyle
+          : node.style === 'small' ? smallStyle
           : {}; // quote handled via wrapping chars below
         if (node.style === 'quote') {
-          return <Text key={k}>{'“'}{renderTextRuns(node.children, h, k)}{'”'}</Text>;
+          return <Text key={k}>{'”'}{renderTextRuns(node.children, h, k)}{'”'}</Text>;
         }
         return <Text key={k} style={s}>{renderTextRuns(node.children, h, k)}</Text>;
       }
@@ -92,9 +96,9 @@ function renderTextRuns(inlines: Inline[], h: InlineHandlers, key = 'i'): React.
           </Text>
         );
       case 'sup':
-        return <Text key={k} style={{ fontSize: sepText.body.fontSize! * 0.75 }}>{renderTextRuns(node.children, h, k)}</Text>;
+        return <Text key={k} style={scriptStyle}>{renderTextRuns(node.children, h, k)}</Text>;
       case 'sub':
-        return <Text key={k} style={{ fontSize: sepText.body.fontSize! * 0.75 }}>{renderTextRuns(node.children, h, k)}</Text>;
+        return <Text key={k} style={scriptStyle}>{renderTextRuns(node.children, h, k)}</Text>;
       case 'code':
         return <Text key={k} style={codeStyle}>{` ${node.v} `}</Text>;
       case 'mathsvg':
@@ -153,19 +157,17 @@ function renderHighlightedRuns(
       }
       case 'em':
         return (
-          <Text key={k} style={node.kind === 'strong'
-            ? { fontWeight: '700', color: SEP_COLORS.textBright }
-            : { fontStyle: 'italic' }}>
+          <Text key={k} style={node.kind === 'strong' ? strongStyle : emStyle}>
             {renderHighlightedRuns(node.children, h, hls, ctx, k)}
           </Text>
         );
       case 'styled': {
         if (node.style === 'quote') {
-          return <Text key={k}>{'“'}{renderHighlightedRuns(node.children, h, hls, ctx, k)}{'”'}</Text>;
+          return <Text key={k}>{'”'}{renderHighlightedRuns(node.children, h, hls, ctx, k)}{'”'}</Text>;
         }
-        const s = node.style === 'underline' ? { textDecorationLine: 'underline' as const }
-          : node.style === 'strike' ? { textDecorationLine: 'line-through' as const }
-          : node.style === 'small' ? { fontSize: sepText.body.fontSize! * 0.85 }
+        const s = node.style === 'underline' ? underlineStyle
+          : node.style === 'strike' ? strikeStyle
+          : node.style === 'small' ? smallStyle
           : {};
         return <Text key={k} style={s}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
       }
@@ -176,9 +178,9 @@ function renderHighlightedRuns(
           </Text>
         );
       case 'sup':
-        return <Text key={k} style={{ fontSize: sepText.body.fontSize! * 0.75 }}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
+        return <Text key={k} style={scriptStyle}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
       case 'sub':
-        return <Text key={k} style={{ fontSize: sepText.body.fontSize! * 0.75 }}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
+        return <Text key={k} style={scriptStyle}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
       case 'code': {
         ctx.offset += node.v.length;
         return <Text key={k} style={codeStyle}>{` ${node.v} `}</Text>;
@@ -256,11 +258,14 @@ interface Props {
   // Annotation ranges over this run's plain text. Only honored on the no-math
   // fast path; math paragraphs fall back to a whole-paragraph indicator upstream.
   highlights?: Highlight[];
+  // Pre-computed hasMath result from the caller — skips an internal tree walk.
+  precomputedHasMath?: boolean;
 }
 
-export function InlineContent({ inlines, handlers, baseStyle, highlights }: Props) {
-  const style = { ...sepText.body, ...baseStyle };
-  if (!hasMath(inlines)) {
+export function InlineContent({ inlines, handlers, baseStyle, highlights, precomputedHasMath }: Props) {
+  const style = baseStyle ? { ...sepText.body, ...baseStyle } : sepText.body;
+  const withMath = precomputedHasMath ?? hasMath(inlines);
+  if (!withMath) {
     const runs = highlights && highlights.length
       ? renderHighlightedRuns(inlines, handlers, highlights, { offset: 0 })
       : renderTextRuns(inlines, handlers);

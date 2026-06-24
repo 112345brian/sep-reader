@@ -1,9 +1,9 @@
-import React, { useCallback, useImperativeHandle, useRef } from 'react';
-import { ScrollView, View, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
+import React, { useCallback, useImperativeHandle, useMemo, useRef } from 'react';
+import { FlatList, View, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { ParsedArticle } from '../types';
+import type { ParsedArticle, Block } from '../types';
 import type { Annotation } from '../../../types';
-import { Blocks, BlockHandlers } from './Blocks';
+import { BlockView, type BlockHandlers } from './Blocks';
 import { SEP_COLORS, SEP_SIDE_PAD } from './theme';
 
 export interface SepArticleProps {
@@ -38,17 +38,29 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
   resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, header, footer, mathSvgs,
 }, ref) {
   const { bottom: bottomInset } = useSafeAreaInsets();
-  const scrollViewRef = useRef<ScrollView>(null);
-  const headingOffsets = useRef<{ id: string; y: number }[]>([]);
+  const flatListRef = useRef<FlatList<Block>>(null);
+  const headingOffsets = useRef<Map<string, number>>(new Map());
   const lastProgress = useRef(0);
   const lastSection = useRef('');
 
+  // Strip leading rule blocks — they're <hr> artifacts from the skipped #toc div.
+  const blocks = useMemo(() => {
+    let i = 0;
+    while (i < article.blocks.length && article.blocks[i].t === 'rule') i++;
+    return i > 0 ? article.blocks.slice(i) : article.blocks;
+  }, [article.blocks]);
+
+  // Map heading id → block index for off-screen scrollToIndex fallback.
+  const headingIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    blocks.forEach((b, i) => {
+      if (b.t === 'heading' && b.id) map.set(b.id, i);
+    });
+    return map;
+  }, [blocks]);
+
   const onHeadingLayout = useCallback((id: string, y: number) => {
-    const arr = headingOffsets.current;
-    const existing = arr.find(o => o.id === id);
-    if (existing) existing.y = y;
-    else arr.push({ id, y });
-    arr.sort((a, b) => a.y - b.y);
+    headingOffsets.current.set(id, y);
   }, []);
 
   const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -60,11 +72,12 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
       onProgress(progress);
     }
     if (onActiveSection) {
-      const spy = contentOffset.y + 80; // 80px offset matches injected scroll-spy
+      const spy = contentOffset.y + 80;
       let active = '';
-      for (const o of headingOffsets.current) {
-        if (o.y <= spy) active = o.id; else break;
-      }
+      let bestY = -1;
+      headingOffsets.current.forEach((y, id) => {
+        if (y <= spy && y > bestY) { bestY = y; active = id; }
+      });
       if (active && active !== lastSection.current) {
         lastSection.current = active;
         onActiveSection(active);
@@ -74,12 +87,20 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
 
   useImperativeHandle(ref, () => ({
     scrollToSection(id: string) {
-      const entry = headingOffsets.current.find(o => o.id === id);
-      if (entry) scrollViewRef.current?.scrollTo({ y: entry.y, animated: true });
+      const y = headingOffsets.current.get(id);
+      if (y !== undefined) {
+        flatListRef.current?.scrollToOffset({ offset: y, animated: true });
+        return;
+      }
+      // Heading not yet laid out (off-screen) — use index-based scroll.
+      const index = headingIndexMap.get(id);
+      if (index !== undefined) {
+        flatListRef.current?.scrollToIndex({ index, animated: true });
+      }
     },
-  }));
+  }), [headingIndexMap]);
 
-  const handlers: BlockHandlers = {
+  const handlers: BlockHandlers = useMemo(() => ({
     onLinkPress,
     onFootnotePress,
     onHeadingLayout,
@@ -89,21 +110,44 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
     onAnnotationPress,
     onAnnotationCreate,
     mathSvgs,
-  };
+  }), [onLinkPress, onFootnotePress, onHeadingLayout, renderFallback, resolveImageSrc,
+      annotations, onAnnotationPress, onAnnotationCreate, mathSvgs]);
+
+  const renderBlock = useCallback(({ item, index }: { item: Block; index: number }) => (
+    <BlockView block={item} h={handlers} suppressTopBorder={index === 0} />
+  ), [handlers]);
+
+  const keyExtractor = useCallback((_: Block, index: number) => String(index), []);
+
+  const listHeader = header ? <View>{header}</View> : null;
+  const listFooter = footer ? <View>{footer}</View> : null;
 
   return (
-    <ScrollView
-      ref={scrollViewRef}
+    <FlatList<Block>
+      ref={flatListRef}
+      data={blocks}
+      renderItem={renderBlock}
+      keyExtractor={keyExtractor}
       style={{ backgroundColor: SEP_COLORS.bg }}
       contentContainerStyle={{ paddingHorizontal: SEP_SIDE_PAD, paddingTop: 16, paddingBottom: 96 + bottomInset }}
       onScroll={handleScroll}
-      scrollEventThrottle={16}
-    >
-      {header}
-      <View>
-        <Blocks blocks={article.blocks} h={handlers} />
-      </View>
-      {footer}
-    </ScrollView>
+      scrollEventThrottle={32}
+      ListHeaderComponent={listHeader}
+      ListFooterComponent={listFooter}
+      windowSize={3}
+      initialNumToRender={12}
+      maxToRenderPerBatch={8}
+      removeClippedSubviews
+      onScrollToIndexFailed={(info) => {
+        // Item not yet rendered — scroll to approximate position then retry once rendered.
+        flatListRef.current?.scrollToOffset({
+          offset: info.averageItemLength * info.index,
+          animated: false,
+        });
+        setTimeout(() => {
+          flatListRef.current?.scrollToIndex({ index: info.index, animated: true });
+        }, 200);
+      }}
+    />
   );
 });

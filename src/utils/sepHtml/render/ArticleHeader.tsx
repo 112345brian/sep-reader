@@ -29,7 +29,10 @@ export function ArticleHeader({ title, parentLabel, preambleHtml, onLinkPress }:
     const parsed = parseSepHtml(cleaned);
     return parsed.blocks.length ? parsed : null;
   }, [preambleHtml]);
-  const handlers: BlockHandlers = { onLinkPress, textStyle: sepHeader.preambleText };
+  const handlers: BlockHandlers = useMemo(
+    () => ({ onLinkPress, textStyle: sepHeader.preambleText }),
+    [onLinkPress]
+  );
 
   return (
     <View style={sepHeader.wrap}>

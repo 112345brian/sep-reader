@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator,
+  View, Text, StyleSheet, ActivityIndicator, InteractionManager,
   TouchableOpacity, Share, Linking, Pressable,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -26,6 +26,7 @@ import { InlineContent } from '../utils/sepHtml/render/Inline';
 import type { Inline, Block } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet from '../components/TocSheet';
+import { parseToc } from '../utils/parseToc';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
 import type { EntryRow, Annotation } from '../types';
 import { contentHash } from '../services/db';
@@ -143,6 +144,51 @@ function IconGraph({ color = '#9a9a9a' }: { color?: string }) {
   );
 }
 
+function ArticleToc({ tocHtml, onJump }: { tocHtml: string; onJump: (href: string) => void }) {
+  const items = useMemo(() => parseToc(tocHtml).filter(i => i.level <= 1), [tocHtml]);
+  if (!items.length) return null;
+  return (
+    <View style={tocInlineStyles.wrap}>
+      {items.map((item, i) => (
+        <TouchableOpacity
+          key={i}
+          style={[tocInlineStyles.row, item.level === 1 && tocInlineStyles.rowSub]}
+          onPress={() => onJump(item.href)}
+          activeOpacity={0.5}
+        >
+          <Text style={tocInlineStyles.num}>{item.num}</Text>
+          <Text style={[tocInlineStyles.text, item.level === 1 && tocInlineStyles.textSub]}>
+            {item.text}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+const tocInlineStyles = StyleSheet.create({
+  wrap: {
+    marginTop: -19,
+    marginBottom: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: '#2a2a2a',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#1e1e1e',
+  },
+  rowSub: { paddingLeft: 20 },
+  num: { fontSize: 12, color: '#444', minWidth: 22, lineHeight: 19, flexShrink: 0 },
+  text: { fontSize: 14, color: '#c0c0c0', lineHeight: 19, flex: 1 },
+  textSub: { fontSize: 13, color: '#777' },
+});
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function ArticleScreen() {
@@ -204,9 +250,12 @@ export default function ArticleScreen() {
   // parse effect only re-fires when the AST or HTML actually changes, not on
   // every state object replacement.
   const astKey = state.phase === 'ready'
-    ? (state.entry.content_ast ?? `html:${state.entry.slug}`)
+    ? `${state.entry.slug}:${state.entry.content_hash ?? 'v0'}`
     : null;
   const readyEntry = state.phase === 'ready' ? state.entry : null;
+  // Memoize so contentHash (50k-char djb2) only runs when the article changes.
+  const contentHtmlForHash = state.phase === 'ready' ? (state.entry.content_html ?? '') : '';
+  const entryContentHash = useMemo(() => contentHtmlForHash ? contentHash(contentHtmlForHash) : '', [contentHtmlForHash]);
   useEffect(() => {
     if (!USE_NATIVE_RENDERER || !readyEntry) {
       setNativeArticle(null);
@@ -280,14 +329,15 @@ export default function ArticleScreen() {
     setOrphanDismissed(false);
 
     recordRead(slug, entry.title, fromSlug).catch(() => {});
-    // Both fire-and-forget — don't block article render.
-    indexLinks(slug, entry.content_html ?? '').catch(() => {});
-    // Prime InPhO date backfill: active article first, then reading history,
-    // so Timeline shows correct chronology without waiting for user to open it.
-    getRecentSlugs(10).then(recent => {
-      const rest = recent.map(r => r.slug).filter(s => s !== slug);
-      primeBackfillForSlugs([slug, ...rest]);
-    }).catch(() => {});
+    // Defer link indexing and InPhO backfill until after the navigation animation
+    // completes so they don't compete with article render on the JS thread.
+    InteractionManager.runAfterInteractions(() => {
+      indexLinks(slug, entry.content_html ?? '').catch(() => {});
+      getRecentSlugs(10).then(recent => {
+        const rest = recent.map(r => r.slug).filter(s => s !== slug);
+        primeBackfillForSlugs([slug, ...rest]);
+      }).catch(() => {});
+    });
     const [customCss, fontSizeStr] = await Promise.all([
       getMeta('custom_css'),
       getMeta('font_size'),
@@ -575,11 +625,11 @@ export default function ArticleScreen() {
             <OrphanedAnnotationsBanner
               annotations={orphaned}
               currentContent={state.entry.content_html ?? ''}
-              currentHash={contentHash(state.entry.content_html ?? '')}
+              currentHash={entryContentHash}
               onResolved={(ids) => {
                 setOrphaned(prev => prev.filter(a => !ids.includes(a.id)));
                 getAnnotationsForSlug(slug).then(all => {
-                  const hash = contentHash(state.entry.content_html ?? '');
+                  const hash = entryContentHash;
                   const valid = all.filter(a => (state.entry.content_html ?? '').includes(a.selected_text));
                   setAnnotations(valid);
                   injectAnnotations(valid);
@@ -606,12 +656,20 @@ export default function ArticleScreen() {
                 article={nativeArticle}
                 mathSvgs={mathSvgs}
                 header={
-                  <ArticleHeader
-                    title={displayTitle}
-                    parentLabel={state.entry.parent_label}
-                    preambleHtml={state.entry.preamble_html}
-                    onLinkPress={handleNativeLink}
-                  />
+                  <View>
+                    <ArticleHeader
+                      title={displayTitle}
+                      parentLabel={state.entry.parent_label}
+                      preambleHtml={state.entry.preamble_html}
+                      onLinkPress={handleNativeLink}
+                    />
+                    {state.entry.toc_html ? (
+                      <ArticleToc
+                        tocHtml={state.entry.toc_html}
+                        onJump={href => nativeArticleRef.current?.scrollToSection(href)}
+                      />
+                    ) : null}
+                  </View>
                 }
                 onLinkPress={handleNativeLink}
                 onFootnotePress={(fnHref) => {
