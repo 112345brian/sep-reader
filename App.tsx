@@ -114,19 +114,22 @@ export default function App() {
         return;
       }
     } else {
-      refreshIndexIfStale(); // background, failures are silent
+      await refreshIndexIfStale();
     }
 
-    // Auto-sync if interval has elapsed
-    const autoSync = await getMeta('auto_sync');
-    const lastDeepSync = await getMeta('last_deep_sync');
-    if (autoSync && autoSync !== 'off') {
-      const days = autoSync === '2days' ? 2 : 7;
-      const elapsed = Date.now() - (lastDeepSync ? Number(lastDeepSync) : 0);
-      if (elapsed > days * 24 * 60 * 60 * 1000) {
-        syncCachedArticles(() => {}).catch(() => {});
-      }
+    // Block until all articles are cached. "As I read" (downloadAll=false) skips
+    // this and lets users fetch on demand — every other article open will hit the
+    // network. MathRenderWebView is already mounted so the math backfill can use
+    // it immediately after. Progress is shown on the splash screen.
+    if (prefs.downloadAll) {
+      await downloadAll(p => setDownloadProgress(p), undefined, prefs.libraryScope);
+      setDownloadProgress(null);
     }
+
+    // One-time migrations — no-ops on subsequent launches (each has a done flag).
+    try { await backfillMathInline(); } catch {}
+    try { await backfillMathHashFormat(); } catch {}
+    try { await backfillAst(); } catch {}
 
     setPhase('ready');
 
@@ -143,21 +146,17 @@ export default function App() {
       }
     }
 
-    // Kick off bulk download in background if user requested it
-    if (prefs.downloadAll) {
-      downloadAll(p => setDownloadProgress(p), undefined, prefs.libraryScope)
-        .then(() => setDownloadProgress(null));
+    // Auto-sync runs after ready — it updates articles already in the DB and
+    // doesn't need to block the user.
+    const autoSync = await getMeta('auto_sync');
+    const lastDeepSync = await getMeta('last_deep_sync');
+    if (autoSync && autoSync !== 'off') {
+      const days = autoSync === '2days' ? 2 : 7;
+      const elapsed = Date.now() - (lastDeepSync ? Number(lastDeepSync) : 0);
+      if (elapsed > days * 24 * 60 * 60 * 1000) {
+        syncCachedArticles(() => {}).catch(() => {});
+      }
     }
-
-    // Sequential chain: MathInline must complete before HashFormat, because
-    // HashFormat expects <math-i base64> nodes that MathInline produces.
-    // HashFormat internally chains backfillAst for articles it rewrites.
-    backfillMathInline()
-      .then(() => backfillMathHashFormat())
-      .catch(() => {});
-    // Independent backfillAst for articles already on the hash pipeline
-    // (fetched after HashFormat landed) that just need AST pre-parsing.
-    backfillAst().catch(() => {});
   }
 
   async function handleOnboardingDone(prefs: Prefs) {
@@ -165,38 +164,43 @@ export default function App() {
     await initialize(prefs);
   }
 
-  if (phase === 'booting') {
+  // Always mounted so the math backfill can use it during boot.
+  const mathWebView = <MathRenderWebView />;
+
+  if (phase === 'booting' || phase === 'indexing' || phase === 'index_error') {
     return (
-      <View style={styles.boot}>
-        <Text style={styles.bootLogo}>Nous</Text>
-      </View>
+      <>
+        {mathWebView}
+        <View style={styles.boot}>
+          <Text style={styles.bootLogo}>Nous</Text>
+          {phase === 'index_error' ? (
+            <Text style={styles.bootError}>Could not reach plato.stanford.edu.{'\n'}Check your connection and relaunch.</Text>
+          ) : downloadProgress ? (
+            <>
+              <View style={styles.bootProgressTrack}>
+                <View style={[styles.bootProgressFill, { width: `${(downloadProgress.done / downloadProgress.total) * 100}%` as any }]} />
+              </View>
+              <Text style={styles.bootLabel}>{downloadProgress.done} / {downloadProgress.total}</Text>
+            </>
+          ) : (
+            <>
+              <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
+              {phase === 'indexing' && <Text style={styles.bootLabel}>Building index…</Text>}
+            </>
+          )}
+        </View>
+      </>
     );
   }
 
   if (phase === 'onboarding') {
     return (
-      <SafeAreaProvider>
-        <OnboardingScreen onDone={handleOnboardingDone} />
-      </SafeAreaProvider>
-    );
-  }
-
-  if (phase === 'indexing') {
-    return (
-      <View style={styles.boot}>
-        <Text style={styles.bootLogo}>Nous</Text>
-        <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
-        <Text style={styles.bootLabel}>Building index…</Text>
-      </View>
-    );
-  }
-
-  if (phase === 'index_error') {
-    return (
-      <View style={styles.boot}>
-        <Text style={styles.bootLogo}>Nous</Text>
-        <Text style={styles.bootError}>Could not reach plato.stanford.edu.{'\n'}Check your connection and relaunch.</Text>
-      </View>
+      <>
+        {mathWebView}
+        <SafeAreaProvider>
+          <OnboardingScreen onDone={handleOnboardingDone} />
+        </SafeAreaProvider>
+      </>
     );
   }
 
@@ -224,18 +228,7 @@ export default function App() {
         </NavigationContainer>
         {/* Opaque backdrop behind the translucent system bars (edge-to-edge) */}
         <SystemBarScrim />
-        {/* Off-screen MathJax renderer (TeX→SVG; MathJax can't run on Hermes) */}
-        <MathRenderWebView />
-        {downloadProgress && (
-          <View style={styles.downloadBar}>
-            <View
-              style={[
-                styles.downloadFill,
-                { width: `${(downloadProgress.done / downloadProgress.total) * 100}%` },
-              ]}
-            />
-          </View>
-        )}
+        {mathWebView}
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
@@ -256,14 +249,11 @@ const styles = StyleSheet.create({
   },
   bootLabel: { color: '#444', fontSize: 13, marginTop: 12 },
   bootError: { color: '#666', fontSize: 14, marginTop: 24, textAlign: 'center', lineHeight: 22, paddingHorizontal: 40 },
-  downloadBar: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0,
-    height: 2,
-    backgroundColor: '#1a1a1a',
+  bootProgressTrack: {
+    width: 160, height: 2, borderRadius: 1,
+    backgroundColor: '#1e1e1e', marginTop: 40, overflow: 'hidden',
   },
-  downloadFill: {
-    height: '100%',
-    backgroundColor: '#7ba4ff',
+  bootProgressFill: {
+    height: '100%', borderRadius: 1, backgroundColor: '#7ba4ff',
   },
 });

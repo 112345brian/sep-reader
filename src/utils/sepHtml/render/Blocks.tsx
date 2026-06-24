@@ -108,16 +108,19 @@ function Blocks({ blocks, h, keyPrefix = 'b' }: { blocks: Block[]; h: BlockHandl
   );
 }
 
-function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
+export const BlockView = React.memo(function BlockView({ block, h, suppressTopBorder }: { block: Block; h: BlockHandlers; suppressTopBorder?: boolean }) {
   switch (block.t) {
     case 'heading': {
       const style = block.level === 2 ? sepText.h2 : block.level === 3 ? sepText.h3 : sepText.h4;
       const margin = block.level === 2 ? sepBlock.h2Margin : block.level === 3 ? sepBlock.h3Margin : sepBlock.h4Margin;
+      const marginStyle = (suppressTopBorder && block.level === 2)
+        ? [margin, { borderTopWidth: 0, marginTop: 16, paddingTop: 8 }]
+        : margin;
       const onLayout = block.id && h.onHeadingLayout
         ? (e: LayoutChangeEvent) => h.onHeadingLayout!(block.id!, e.nativeEvent.layout.y)
         : undefined;
       return (
-        <View style={margin} onLayout={onLayout}>
+        <View style={marginStyle} onLayout={onLayout}>
           <InlineContent inlines={block.children} handlers={h} baseStyle={style} />
         </View>
       );
@@ -141,7 +144,7 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
       const hasDisplay = block.children.some(c => (c.t === 'mathsvg' || c.t === 'mathref') && c.display);
       let inner: React.ReactNode;
       if (!hasDisplay) {
-        inner = <InlineContent inlines={block.children} handlers={h} baseStyle={h.textStyle} highlights={highlights} />;
+        inner = <InlineContent inlines={block.children} handlers={h} baseStyle={h.textStyle} highlights={highlights} precomputedHasMath={paraMath} />;
       } else {
         const segments: React.ReactNode[] = [];
         let run: typeof block.children = [];
@@ -279,6 +282,6 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
     default:
       return null;
   }
-}
+});
 
 export { Blocks };

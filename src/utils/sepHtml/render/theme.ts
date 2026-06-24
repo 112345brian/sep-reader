@@ -67,7 +67,7 @@ export const sepMutedText = {
 // Article header chrome (title / breadcrumb / preamble), translated from the
 // WebView's h1.pagetitle, .entry-breadcrumb, and #preamble rules.
 export const sepHeader = {
-  wrap: { marginBottom: 24 } as ViewStyle,
+  wrap: { marginBottom: 0 } as ViewStyle,
   breadcrumb: {
     alignSelf: 'flex-start',
     fontFamily: 'System',
@@ -94,9 +94,7 @@ export const sepHeader = {
     marginBottom: 10,
   } as TextStyle,
   preamble: {
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: SEP_COLORS.border,
+    paddingBottom: 8,
   } as ViewStyle,
   preambleText: {
     fontSize: Math.round(BASE * 0.9),

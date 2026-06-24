@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.6.0] — 2026-06-24
+
+### Added
+- **Inline table of contents** — a compact, tappable TOC appears between the preamble and the first article section, replacing the dead space left by the skipped `#toc` div. Top-level sections are full brightness; subsections are indented and muted. Tapping any entry scrolls directly to that section.
+- **App icon** — 7-ray sun on a dark rounded-square background, replaces the default RN icon.
+
+### Changed
+- **Article body virtualized** — `SepArticle` now uses `FlatList` instead of `ScrollView`. Only ~10 blocks are mounted at a time regardless of article length (previously all 300+ blocks were mounted on open), eliminating the JS-thread block that delayed initial paint and gesture callbacks.
+- **Boot blocks until fully ready** — the splash screen now holds until the article index is fresh, all articles are downloaded (if `downloadAll` is set), and all one-time migrations (math backfill, AST pre-bake) are complete. Once the app unlocks, every article opens instantly with no fetch spinner.
+- **MathRenderWebView mounted during boot** — the hidden MathJax WebView is now alive during the boot phase so the math backfill can use it immediately rather than racing against the UI.
+- **Download progress shown on splash** — bulk download now displays a progress bar and count ("142 / 1838") on the boot screen instead of a thin overlay bar that appeared after the app was already shown.
+
+### Fixed
+- **Double divider at article start** — the two `<hr>` elements orphaned by the skipped `#toc` div are now stripped before rendering. The first article heading no longer shows its section-separator top border (redundant given the TOC above it).
+- **Redundant preamble bottom border** — removed the hard border under the preamble; the TOC's top hairline now provides that visual break.
+- **Per-render object allocation in inline styles** — `bold`, `italic`, `superscript`, `small`, `underline`, and `strikethrough` style objects in `Inline.tsx` are now hoisted to module-level constants instead of being recreated on every render.
+- **Double `hasMath` traversal** — `paraMath` is now computed once in `BlockView` and passed as `precomputedHasMath` to `InlineContent`, eliminating a redundant full inline tree walk per paragraph.
+- **Unstable handler object causing full re-renders** — `handlers` in `SepArticle` is now wrapped in `useMemo`, so unrelated state changes (overlay menu, footnote popup, TOC sheet) no longer cause every block to re-render.
+- **O(n) `astKey`** — was serializing the full AST JSON on every render for comparison; now keyed by `slug:content_hash`.
+- **`indexLinks` and backfill priming blocking navigation** — deferred to `InteractionManager.runAfterInteractions` so they no longer compete with the navigation animation.
+
 ## [0.5.0] — 2026-06-23
 
 ### Added
