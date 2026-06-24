@@ -10,7 +10,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   searchEntries, getRecentSlugs, getBookmarks, getAllAnnotations,
-  toggleBookmark, getAllEntries,
+  toggleBookmark, getAllEntries, forceSetReadProgress,
 } from '../services/db';
 import type { EntrySummary } from '../types';
 import type { AnnotationWithTitle } from '../services/db';
@@ -77,6 +77,8 @@ interface ArticleGroup {
 type BrowseSectionItem =
   | { kind: 'entry'; slug: string; title: string }
   | { kind: 'parent'; label: string; slug: string | null; children: { slug: string; subTitle: string }[] };
+
+const BROWSE_INITIAL = 15;
 
 interface BrowseSection {
   title: string; // the letter
@@ -192,10 +194,13 @@ export default function HomeScreen() {
   const [browseEntries, setBrowseEntries] = useState<{ slug: string; title: string; parent_label: string | null }[]>([]);
   const [browseLoaded, setBrowseLoaded]   = useState(false);
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+  const [expandedLetters, setExpandedLetters] = useState<Set<string>>(new Set());
 
-  const searchInputRef = useRef<TextInput>(null);
-  const debounce       = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sectionListRef = useRef<SectionList<BrowseSectionItem>>(null);
+  const searchInputRef    = useRef<TextInput>(null);
+  const debounce          = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sectionListRef    = useRef<SectionList<BrowseSectionItem>>(null);
+  const pendingScrollRef  = useRef<string | null>(null);
+  const expandedLettersRef = useRef<Set<string>>(new Set());
 
   const loadData = useCallback(async () => {
     const [h, b, anns] = await Promise.all([
@@ -260,13 +265,18 @@ export default function HomeScreen() {
 
   const open = (slug: string, title: string) => nav.navigate('Article', { slug, title });
 
-  const handleIconPress = (item: EntrySummary, isBookmarked: boolean) => {
-    const bmLabel = isBookmarked ? 'Remove Bookmark' : 'Bookmark';
+  const handleIconPress = async (item: EntrySummary) => {
+    await toggleBookmark(item.slug, item.title);
+    loadData();
+  };
+
+  const handleIconLongPress = (item: EntrySummary) => {
+    const isRead = (item.read_progress ?? 0) >= 1;
     Alert.alert(item.title, undefined, [
       {
-        text: bmLabel,
+        text: isRead ? 'Mark as Unread' : 'Mark as Read',
         onPress: async () => {
-          await toggleBookmark(item.slug, item.title);
+          await forceSetReadProgress(item.slug, isRead ? 0 : 1);
           loadData();
         },
       },
@@ -361,16 +371,57 @@ export default function HomeScreen() {
 
   const browseLetters = useMemo(() => browseSections.map(s => s.title), [browseSections]);
 
+  const visibleBrowseSections = useMemo<BrowseSection[]>(() =>
+    browseSections.map(s => {
+      if (expandedLetters.has(s.title) || s.data.length <= BROWSE_INITIAL) return s;
+      return { ...s, data: s.data.slice(0, BROWSE_INITIAL) };
+    }),
+    [browseSections, expandedLetters]
+  );
+
+  const expandLetter = useCallback((letter: string) => {
+    if (expandedLettersRef.current.has(letter)) return;
+    expandedLettersRef.current = new Set(expandedLettersRef.current);
+    expandedLettersRef.current.add(letter);
+    setExpandedLetters(expandedLettersRef.current);
+  }, []);
+
+  // Stable ref so SectionList never sees a changed onViewableItemsChanged prop.
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
+    for (const vi of viewableItems) {
+      if (!vi.isViewable || !vi.section) continue;
+      const section = vi.section as BrowseSection;
+      const letter = section.title;
+      if (expandedLettersRef.current.has(letter)) continue;
+      // Expand when the last item of the truncated section scrolls into view.
+      if (section.data[section.data.length - 1] === vi.item) {
+        expandedLettersRef.current = new Set(expandedLettersRef.current);
+        expandedLettersRef.current.add(letter);
+        setExpandedLetters(new Set(expandedLettersRef.current));
+      }
+    }
+  });
+
   const handleAlphaSelect = useCallback((letter: string) => {
-    const idx = browseSections.findIndex(s => s.title === letter);
-    if (idx < 0 || !sectionListRef.current) return;
+    pendingScrollRef.current = letter;
+    expandedLettersRef.current = new Set(expandedLettersRef.current);
+    expandedLettersRef.current.add(letter);
+    setExpandedLetters(expandedLettersRef.current);
+  }, []);
+
+  useEffect(() => {
+    const letter = pendingScrollRef.current;
+    if (!letter || !sectionListRef.current) return;
+    const idx = visibleBrowseSections.findIndex(s => s.title === letter);
+    if (idx < 0) return;
+    pendingScrollRef.current = null;
     sectionListRef.current.scrollToLocation({
       sectionIndex: idx,
       itemIndex: 0,
       animated: false,
       viewPosition: 0,
     });
-  }, [browseSections]);
+  }, [visibleBrowseSections]);
 
   return (
     <GestureDetector gesture={swipeLeft}>
@@ -417,7 +468,7 @@ export default function HomeScreen() {
         <FlatList
           data={results}
           keyExtractor={i => i.slug}
-          renderItem={({ item }) => <PageRow item={item} onPress={open} isBookmarked={bookmarkSlugs.has(item.slug)} onIconPress={i => handleIconPress(i, bookmarkSlugs.has(i.slug))} />}
+          renderItem={({ item }) => <PageRow item={item} onPress={open} isBookmarked={bookmarkSlugs.has(item.slug)} onIconPress={handleIconPress} onIconLongPress={handleIconLongPress} />}
           contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={
@@ -450,14 +501,14 @@ export default function HomeScreen() {
             <FlatList
               data={recentHistory}
               keyExtractor={i => i.slug}
-              renderItem={({ item }) => <PageRow item={item} onPress={open} isBookmarked={bookmarkSlugs.has(item.slug)} onIconPress={i => handleIconPress(i, bookmarkSlugs.has(i.slug))} />}
+              renderItem={({ item }) => <PageRow item={item} onPress={open} isBookmarked={bookmarkSlugs.has(item.slug)} onIconPress={handleIconPress} onIconLongPress={handleIconLongPress} />}
               contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
               ListHeaderComponent={
                 <>
                   {bookmarks.length > 0 && (
                     <>
                       <Text style={styles.secLabel}>Bookmarks</Text>
-                      {bookmarks.map(item => <PageRow key={item.slug} item={item} onPress={open} isBookmarked onIconPress={i => handleIconPress(i, true)} />)}
+                      {bookmarks.map(item => <PageRow key={item.slug} item={item} onPress={open} isBookmarked onIconPress={handleIconPress} onIconLongPress={handleIconLongPress} />)}
                     </>
                   )}
                   {recentHistory.length > 0 && bookmarks.length > 0 && <Text style={styles.secLabel}>Recent</Text>}
@@ -515,11 +566,13 @@ export default function HomeScreen() {
                 <>
                   <SectionList<BrowseSectionItem>
                     ref={sectionListRef}
-                    sections={browseSections}
+                    sections={visibleBrowseSections}
                     keyExtractor={item => item.kind === 'parent' ? `parent-${item.label}` : item.slug}
                     contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingLeft: 32 }}
                     stickySectionHeadersEnabled
                     onScrollToIndexFailed={() => {}}
+                    onViewableItemsChanged={onViewableItemsChanged.current}
+                    viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
                     renderSectionHeader={({ section }) => (
                       <View style={styles.browseHeader}>
                         <Text style={styles.browseHeaderText}>{section.title}</Text>
@@ -588,12 +641,13 @@ export default function HomeScreen() {
 // ── Page row ───────────────────────────────────────────────────────────────
 
 function PageRow({
-  item, onPress, isBookmarked = false, onIconPress,
+  item, onPress, isBookmarked = false, onIconPress, onIconLongPress,
 }: {
   item: EntrySummary;
   onPress: (slug: string, title: string) => void;
   isBookmarked?: boolean;
   onIconPress?: (item: EntrySummary) => void;
+  onIconLongPress?: (item: EntrySummary) => void;
 }) {
   const pct = Math.round((item.read_progress ?? 0) * 100);
   const annCount = item.annotation_count ?? 0;
@@ -609,6 +663,8 @@ function PageRow({
       <TouchableOpacity
         style={[styles.pageRowIcon, isBookmarked && styles.pageRowIconBookmarked]}
         onPress={() => onIconPress?.(item)}
+        onLongPress={() => onIconLongPress?.(item)}
+        delayLongPress={400}
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         activeOpacity={0.6}
       >

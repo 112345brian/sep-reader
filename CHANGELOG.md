@@ -2,6 +2,9 @@
 
 ## [0.6.0] — 2026-06-24
 
+### Changed
+- **Bookmark icon tap/long-press** — tapping the icon on a home-screen row immediately toggles the bookmark with no confirmation modal. Long-pressing opens a modal to mark the article as read or unread.
+
 ### Added
 - **Inline table of contents** — a compact, tappable TOC appears between the preamble and the first article section, replacing the dead space left by the skipped `#toc` div. Top-level sections are full brightness; subsections are indented and muted. Tapping any entry scrolls directly to that section.
 - **App icon** — 7-ray sun on a dark rounded-square background, replaces the default RN icon.
