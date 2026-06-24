@@ -74,6 +74,19 @@ describe('parseSepHtml', () => {
     expect(inl.some(i => i.t === 'text' && i.v.includes('\\(10'))).toBe(true);
   });
 
+  it('marks lists under a Bibliography heading as bib, leaves others plain', () => {
+    const html = `<div id="main-text">
+      <h2 id="bib">Bibliography</h2>
+      <ul><li><p>Quine, W.V.O., 1960.</p></li></ul>
+      <h2 id="other">Other Internet Resources</h2>
+      <ul><li><p>Some link.</p></li></ul>
+    </div>`;
+    const lists = parseSepHtml(html).blocks.filter(b => b.t === 'list') as Extract<Block, { t: 'list' }>[];
+    expect(lists).toHaveLength(2);
+    expect(lists[0].bib).toBe(true);  // under Bibliography
+    expect(lists[1].bib).toBeFalsy(); // sibling section, not bibliographic
+  });
+
   it('captures definition lists', () => {
     const html = `<div id="main-text"><dl><dt>Term</dt><dd><p>Definition.</p></dd></dl></div>`;
     const dl = parseSepHtml(html).blocks.find(b => b.t === 'deflist') as Extract<Block, { t: 'deflist' }>;

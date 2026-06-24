@@ -23,6 +23,14 @@ export interface Highlight {
 
 const linkStyle = { color: SEP_COLORS.accent, textDecorationLine: 'underline' as const };
 const fnStyle = { color: SEP_COLORS.accent, fontSize: sepText.body.fontSize! * 0.75 };
+// Inline code chip — mirrors readerCss `code { background; border-radius; … }`.
+// RN can't pad inline text, so hair-spaces fake the horizontal breathing room.
+const codeStyle = {
+  fontFamily: 'monospace' as const,
+  fontSize: sepText.body.fontSize! * 0.9,
+  color: SEP_COLORS.textBright,
+  backgroundColor: SEP_COLORS.bgRaised,
+};
 
 export function hasMath(inlines: Inline[]): boolean {
   for (const i of inlines) {
@@ -74,7 +82,7 @@ function renderTextRuns(inlines: Inline[], h: InlineHandlers, key = 'i'): React.
       case 'sub':
         return <Text key={k} style={{ fontSize: sepText.body.fontSize! * 0.75 }}>{renderTextRuns(node.children, h, k)}</Text>;
       case 'code':
-        return <Text key={k} style={{ fontFamily: 'monospace', color: SEP_COLORS.textBright }}>{node.v}</Text>;
+        return <Text key={k} style={codeStyle}>{` ${node.v} `}</Text>;
       case 'mathsvg': {
         const pw = Math.max(1, Math.round(node.w * PX_PER_EX));
         const ph = Math.max(1, Math.round(node.h * PX_PER_EX));
@@ -162,7 +170,7 @@ function renderHighlightedRuns(
         return <Text key={k} style={{ fontSize: sepText.body.fontSize! * 0.75 }}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
       case 'code': {
         ctx.offset += node.v.length;
-        return <Text key={k} style={{ fontFamily: 'monospace', color: SEP_COLORS.textBright }}>{node.v}</Text>;
+        return <Text key={k} style={codeStyle}>{` ${node.v} `}</Text>;
       }
       case 'fnref':
         return (
@@ -228,7 +236,7 @@ function flattenToTokens(inlines: Inline[], h: InlineHandlers, style: object, ou
     } else if (node.t === 'fnref') {
       out.push(<Text key={`f${keyRef.n++}`} style={{ ...style, ...fnStyle }} onPress={() => h.onFootnotePress?.(node.href, node.label)}>{node.label}</Text>);
     } else if (node.t === 'code') {
-      out.push(<Text key={`c${keyRef.n++}`} style={{ ...style, fontFamily: 'monospace' }}>{node.v}</Text>);
+      out.push(<Text key={`c${keyRef.n++}`} style={{ ...style, ...codeStyle }}>{` ${node.v} `}</Text>);
     }
   }
 }

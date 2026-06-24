@@ -19,6 +19,9 @@ export interface SepArticleProps {
   annotations?: Annotation[];
   onAnnotationPress?: (ann: Annotation) => void;
   onAnnotationCreate?: (text: string) => void;
+  // Rendered inside the scroll view before the article body (title / breadcrumb
+  // / preamble). Scrolls away with the content.
+  header?: React.ReactNode;
   // Rendered inside the scroll view after the article body (e.g. the
   // "Related by link" backlinks row).
   footer?: React.ReactNode;
@@ -30,7 +33,7 @@ export interface SepArticleHandle {
 
 export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(function SepArticle({
   article, onLinkPress, onFootnotePress, onProgress, onActiveSection, renderFallback,
-  resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, footer,
+  resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, header, footer,
 }, ref) {
   const { bottom: bottomInset } = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -93,6 +96,7 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
       onScroll={handleScroll}
       scrollEventThrottle={16}
     >
+      {header}
       <View>
         <Blocks blocks={article.blocks} h={handlers} />
       </View>

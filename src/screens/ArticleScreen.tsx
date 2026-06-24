@@ -21,6 +21,7 @@ import { primeBackfillForSlugs } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { SepArticle, type SepArticleHandle } from '../utils/sepHtml/render/SepArticle';
+import { ArticleHeader } from '../utils/sepHtml/render/ArticleHeader';
 import { InlineContent } from '../utils/sepHtml/render/Inline';
 import type { Inline } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
@@ -530,6 +531,14 @@ export default function ArticleScreen() {
               <SepArticle
                 ref={nativeArticleRef}
                 article={nativeArticle}
+                header={
+                  <ArticleHeader
+                    title={displayTitle}
+                    parentLabel={state.entry.parent_label}
+                    preambleHtml={state.entry.preamble_html}
+                    onLinkPress={handleNativeLink}
+                  />
+                }
                 onLinkPress={handleNativeLink}
                 onFootnotePress={(fnHref) => {
                   const id = fnHref.startsWith('#') ? fnHref.slice(1) : fnHref;

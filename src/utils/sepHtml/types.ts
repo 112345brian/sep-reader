@@ -39,7 +39,9 @@ export interface DefRow {
 export type Block =
   | { t: 'heading'; level: 2 | 3 | 4 | 5 | 6; id?: string; children: Inline[] }
   | { t: 'para'; children: Inline[] }
-  | { t: 'list'; ordered: boolean; items: Block[][] }
+  // `bib` marks a bibliography list (follows a "Bibliography" heading): rendered
+  // without bullets, with a hanging indent, muted and slightly smaller.
+  | { t: 'list'; ordered: boolean; items: Block[][]; bib?: boolean }
   | { t: 'blockquote'; children: Block[] }
   | { t: 'deflist'; rows: DefRow[] }
   | TableBlock

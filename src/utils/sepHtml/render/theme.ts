@@ -57,6 +57,54 @@ export const sepText = {
   } as TextStyle,
 };
 
+// Muted, slightly-smaller text for blockquotes and the preamble — mirrors
+// readerCss `blockquote { font-size: 0.97rem; color: muted }` and `#preamble`.
+export const sepMutedText = {
+  fontSize: Math.round(BASE * 0.97),
+  color: SEP_COLORS.textMuted,
+} as TextStyle;
+
+// Article header chrome (title / breadcrumb / preamble), translated from the
+// WebView's h1.pagetitle, .entry-breadcrumb, and #preamble rules.
+export const sepHeader = {
+  wrap: { marginBottom: 24 } as ViewStyle,
+  breadcrumb: {
+    alignSelf: 'flex-start',
+    fontFamily: 'System',
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+    color: SEP_COLORS.accent,
+    backgroundColor: 'rgba(91, 142, 245, 0.13)',
+    borderWidth: 1,
+    borderColor: 'rgba(91, 142, 245, 0.30)',
+    borderRadius: 5,
+    paddingVertical: 2,
+    paddingHorizontal: 9,
+    overflow: 'hidden',
+    marginBottom: 10,
+  } as TextStyle,
+  title: {
+    fontFamily: SERIF,
+    fontSize: Math.round(BASE * 1.85),
+    fontWeight: '700',
+    letterSpacing: -0.6,
+    color: SEP_COLORS.textBright,
+    lineHeight: Math.round(BASE * 1.85 * 1.2),
+    marginBottom: 10,
+  } as TextStyle,
+  preamble: {
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: SEP_COLORS.border,
+  } as ViewStyle,
+  preambleText: {
+    fontSize: Math.round(BASE * 0.9),
+    lineHeight: Math.round(BASE * 0.9 * 1.55),
+    color: SEP_COLORS.textMuted,
+  } as TextStyle,
+};
+
 // Block spacing (margins) — translated from rem to px against the 17px base.
 export const sepBlock = {
   h2Margin: { marginTop: 40, marginBottom: 13, paddingTop: 30, borderTopWidth: 1, borderTopColor: '#252525' } as ViewStyle,
@@ -76,4 +124,13 @@ export const sepBlock = {
   } as ViewStyle,
   listIndent: 28, // padding-left: 1.75rem
   liGap: 6, // li margin 0.35em
+  // Bibliography entries — muted, smaller, separated (readerCss .bib li). A true
+  // CSS hanging indent isn't expressible in RN Text, so each reference is a
+  // flush, spaced block instead.
+  bibItem: { marginBottom: 12 } as ViewStyle,
+  bibText: {
+    fontSize: Math.round(BASE * 0.94),
+    lineHeight: Math.round(BASE * 0.94 * 1.6),
+    color: SEP_COLORS.textMuted,
+  } as TextStyle,
 };

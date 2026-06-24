@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Text, View, Image, Pressable, type LayoutChangeEvent } from 'react-native';
+import { Text, View, Image, Pressable, type LayoutChangeEvent, type TextStyle } from 'react-native';
 import type { Block, Inline } from '../types';
 import type { Annotation } from '../../../types';
 import { SvgXml } from 'react-native-svg';
 import { InlineContent, InlineHandlers, hasMath, type Highlight } from './Inline';
-import { SEP_BASE_FONT, SEP_COLORS, sepBlock, sepText } from './theme';
+import { SEP_BASE_FONT, SEP_COLORS, sepBlock, sepMutedText, sepText } from './theme';
 
 const PX_PER_EX = SEP_BASE_FONT / 2;
 
@@ -15,6 +15,9 @@ export interface BlockHandlers extends InlineHandlers {
   annotations?: Annotation[];
   onAnnotationPress?: (ann: Annotation) => void;
   onAnnotationCreate?: (text: string) => void;
+  // Inherited body-text style for nested contexts (blockquote, preamble) where
+  // paragraphs render muted/smaller. Applied to `para` inline content.
+  textStyle?: TextStyle;
 }
 
 // Article figure that sizes itself to the image's intrinsic aspect ratio,
@@ -25,7 +28,7 @@ function ArticleImage({ uri, alt }: { uri: string; alt?: string }) {
   return (
     <Image
       source={{ uri }}
-      style={aspect ? { width: '100%', aspectRatio: aspect } : { width: '100%', height: 180 }}
+      style={[{ borderRadius: 4 }, aspect ? { width: '100%', aspectRatio: aspect } : { width: '100%', height: 180 }]}
       resizeMode="contain"
       onLoad={(e) => {
         const { width, height } = e.nativeEvent.source;
@@ -138,12 +141,12 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
       const hasDisplay = block.children.some(c => c.t === 'mathsvg' && c.display);
       let inner: React.ReactNode;
       if (!hasDisplay) {
-        inner = <InlineContent inlines={block.children} handlers={h} highlights={highlights} />;
+        inner = <InlineContent inlines={block.children} handlers={h} baseStyle={h.textStyle} highlights={highlights} />;
       } else {
         const segments: React.ReactNode[] = [];
         let run: typeof block.children = [];
         const flush = (key: string) => {
-          if (run.length) { segments.push(<InlineContent key={key} inlines={run} handlers={h} />); run = []; }
+          if (run.length) { segments.push(<InlineContent key={key} inlines={run} handlers={h} baseStyle={h.textStyle} />); run = []; }
         };
         block.children.forEach((c, i) => {
           if (c.t === 'mathsvg' && c.display) {
@@ -184,17 +187,31 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
       return <View style={sepBlock.paraGap}>{inner}</View>;
     }
     case 'blockquote':
+      // Inner paragraphs render muted + slightly smaller (readerCss blockquote).
       return (
         <View style={sepBlock.blockquote}>
-          <Blocks blocks={block.children} h={h} />
+          <Blocks blocks={block.children} h={{ ...h, textStyle: sepMutedText }} />
         </View>
       );
-    case 'list':
+    case 'list': {
+      // Bibliography lists: no bullets, hanging indent, muted + smaller. Plain
+      // lists: bullet/number gutter with the standard indent.
+      if (block.bib) {
+        return (
+          <View style={{ marginBottom: 16 }}>
+            {block.items.map((item, i) => (
+              <View key={i} style={sepBlock.bibItem}>
+                <Blocks blocks={item} h={{ ...h, textStyle: sepBlock.bibText }} keyPrefix={`bib${i}`} />
+              </View>
+            ))}
+          </View>
+        );
+      }
       return (
         <View style={{ marginBottom: 16 }}>
           {block.items.map((item, i) => (
             <View key={i} style={{ flexDirection: 'row', marginBottom: sepBlock.liGap }}>
-              <Text style={{ ...sepText.body, width: sepBlock.listIndent }}>
+              <Text style={{ ...sepText.body, ...h.textStyle, width: sepBlock.listIndent }}>
                 {block.ordered ? `${i + 1}.` : '•'}
               </Text>
               <View style={{ flex: 1 }}>
@@ -204,6 +221,7 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
           ))}
         </View>
       );
+    }
     case 'deflist':
       return (
         <View style={{ marginBottom: 16 }}>
@@ -239,7 +257,7 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
         </View>
       );
     case 'rule':
-      return <View style={{ height: 1, backgroundColor: SEP_COLORS.border, marginVertical: 20 }} />;
+      return <View style={{ height: 1, backgroundColor: SEP_COLORS.border, marginVertical: 32 }} />;
     case 'image': {
       const uri = h.resolveImageSrc?.(block.src) ?? null;
       if (!uri) return null;

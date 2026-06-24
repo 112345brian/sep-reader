@@ -398,10 +398,43 @@ function collectFootnotes(nodes: DomNode[], out: Record<string, Inline[]>): void
   }
 }
 
+// Mark lists that fall under a "Bibliography" (or "References") heading so the
+// renderer can drop the bullets and use a hanging indent. SEP tags these with
+// ids/classes we lose during parsing, so we recover the intent positionally:
+// once a bibliography heading is seen, every following list — until the next
+// same-or-higher-level heading — is bibliographic.
+function markBibliographyLists(blocks: Block[]): void {
+  let inBib = false;
+  let bibLevel = 0;
+  for (const b of blocks) {
+    if (b.t === 'heading') {
+      const text = inlinePlainText(b.children).trim().toLowerCase();
+      if (/^(bibliography|references|further reading)\b/.test(text)) {
+        inBib = true;
+        bibLevel = b.level;
+      } else if (inBib && b.level <= bibLevel) {
+        inBib = false;
+      }
+    } else if (b.t === 'list' && inBib) {
+      b.bib = true;
+    }
+  }
+}
+
+function inlinePlainText(inlines: Inline[]): string {
+  let s = '';
+  for (const i of inlines) {
+    if (i.t === 'text' || i.t === 'code') s += i.v;
+    else if ('children' in i && Array.isArray(i.children)) s += inlinePlainText(i.children);
+  }
+  return s;
+}
+
 export function parseSepHtml(html: string): ParsedArticle {
   const doc = parseDocument(html, { decodeEntities: true });
   const roots = (doc.children ?? []) as unknown as DomNode[];
   const blocks = parseBlocks(roots);
+  markBibliographyLists(blocks);
   const footnotes: Record<string, Inline[]> = {};
   collectFootnotes(roots, footnotes);
   return {
