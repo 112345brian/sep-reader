@@ -112,6 +112,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     db.runAsync('ALTER TABLE entries ADD COLUMN excerpt TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN parent_label TEXT').catch(() => {}),
     db.runAsync("ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'sep'").catch(() => {}),
+    db.runAsync('ALTER TABLE entries ADD COLUMN has_math INTEGER DEFAULT 0').catch(() => {}),
   ]);
 
   // One-time migration: clear articles cached before preamble_html column existed
@@ -213,7 +214,7 @@ export async function upsertIndexEntries(
 
 export async function cacheArticle(
   slug: string,
-  data: Pick<EntryRow, 'author' | 'pub_date' | 'toc_html' | 'preamble_html' | 'content_html'>
+  data: Pick<EntryRow, 'author' | 'pub_date' | 'toc_html' | 'preamble_html' | 'content_html' | 'has_math'>
 ): Promise<void> {
   const db = await getDb();
   const wordCount = countWords(data.content_html ?? '');
@@ -236,11 +237,11 @@ export async function cacheArticle(
     `UPDATE entries SET
        author = ?, pub_date = ?, content_hash = ?,
        toc_html = ?, preamble_html = ?,
-       content_html = ?, word_count = ?, excerpt = ?, cached_at = ?
+       content_html = ?, has_math = ?, word_count = ?, excerpt = ?, cached_at = ?
      WHERE slug = ?`,
     [data.author ?? null, data.pub_date ?? null, hash,
      data.toc_html ?? null, data.preamble_html ?? null,
-     data.content_html ?? null, wordCount, excerpt, now, slug]
+     data.content_html ?? null, data.has_math ? 1 : 0, wordCount, excerpt, now, slug]
   );
 
   // Record the new version
@@ -411,15 +412,29 @@ function buildTree(reads: ReadRow[]): ReadNode[] {
   return roots;
 }
 
+const metaCache = new Map<string, string | null>();
+
+// Keep the in-memory cache in step with any code path that writes `meta`
+// directly (savePrefs, Zotero creds, importUserData) instead of via setMeta.
+// Without this, getMeta would keep serving the pre-write value for the rest of
+// the session (e.g. restored custom_css / font_size silently ignored).
+function cacheMeta(key: string, value: string | null): void {
+  metaCache.set(key, value);
+}
+
 export async function getMeta(key: string): Promise<string | null> {
+  if (metaCache.has(key)) return metaCache.get(key)!;
   const db = await getDb();
   const row = await db.getFirstAsync<{ value: string }>(
     'SELECT value FROM meta WHERE key = ?', [key]
   );
-  return row?.value ?? null;
+  const val = row?.value ?? null;
+  metaCache.set(key, val);
+  return val;
 }
 
 export async function setMeta(key: string, value: string): Promise<void> {
+  metaCache.set(key, value);
   const db = await getDb();
   await db.runAsync(
     'INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value]
@@ -453,6 +468,10 @@ export async function savePrefs(prefs: Prefs): Promise<void> {
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_library_scope', ?)", [prefs.libraryScope]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('onboarding_done', 'true')");
   });
+  cacheMeta('pref_home', prefs.homeMode);
+  cacheMeta('pref_download_all', String(prefs.downloadAll));
+  cacheMeta('pref_library_scope', prefs.libraryScope);
+  cacheMeta('onboarding_done', 'true');
 }
 
 export async function toggleBookmark(slug: string, title: string): Promise<boolean> {
@@ -686,6 +705,8 @@ export async function saveZoteroPrefs(apiKey: string, userId: string): Promise<v
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_api_key', ?)", [apiKey]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_user_id', ?)", [userId]);
   });
+  cacheMeta('zotero_api_key', apiKey);
+  cacheMeta('zotero_user_id', userId);
 }
 
 // ── Annotations ──────────────────────────────────────────────────────────────
@@ -821,6 +842,7 @@ export async function importUserData(data: UserDataExport): Promise<void> {
       await db.runAsync(
         'INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value]
       );
+      cacheMeta(key, value as string);
     }
   });
 }

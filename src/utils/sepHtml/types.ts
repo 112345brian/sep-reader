@@ -56,4 +56,9 @@ export interface ParsedArticle {
   // True if any block is `unsupported` — lets the screen decide whether to
   // pre-warm a WebView fallback.
   hasUnsupported: boolean;
+  // Footnote definitions keyed by their element id (e.g. "note-1"), parsed from
+  // the article's notes list. The renderer resolves a tapped <sup> ref (href
+  // "#note-1") against this map to show the note natively — no per-tap HTML
+  // re-scrape. Empty when the article has no footnotes.
+  footnotes: Record<string, Inline[]>;
 }

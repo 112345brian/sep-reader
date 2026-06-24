@@ -10,6 +10,15 @@ export interface InlineHandlers {
   resolveMath: MathResolver;
 }
 
+// A character range (over the paragraph's plain text, as produced by inlineText)
+// to paint as an annotation highlight, with the tap target that opens it.
+export interface Highlight {
+  start: number;
+  end: number;
+  color: string;
+  onPress?: () => void;
+}
+
 const linkStyle = { color: SEP_COLORS.accent, textDecorationLine: 'underline' as const };
 const fnStyle = { color: SEP_COLORS.accent, fontSize: sepText.body.fontSize! * 0.75 };
 
@@ -67,6 +76,95 @@ function renderTextRuns(inlines: Inline[], h: InlineHandlers, key = 'i'): React.
       case 'math':
         // shouldn't reach here on the fast path; render TeX as a safety net.
         return <Text key={k} style={{ fontFamily: 'monospace' }}>{node.tex}</Text>;
+      default:
+        return null;
+    }
+  });
+}
+
+// ── Highlight-aware text path ────────────────────────────────────────────────
+// Renders the same as renderTextRuns but threads a running character offset so
+// annotation ranges (computed over the paragraph's plain text) can be painted on
+// the exact matched span, with multiple non-overlapping highlights supported.
+// Offsets advance for exactly the characters inlineText() counts (text + code +
+// nested children), so range math stays in sync with the matcher.
+function wrapTextWithHighlights(
+  text: string, base: number, highlights: Highlight[], keyBase: string,
+): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  let pos = 0;
+  while (pos < text.length) {
+    const abs = base + pos;
+    const hl = highlights.find(h => abs >= h.start && abs < h.end);
+    if (hl) {
+      const end = Math.min(text.length, hl.end - base);
+      out.push(
+        <Text key={`${keyBase}-h${pos}`} style={{ backgroundColor: hl.color }} onPress={hl.onPress}>
+          {text.slice(pos, end)}
+        </Text>
+      );
+      pos = end;
+    } else {
+      let next = text.length;
+      for (const h of highlights) {
+        if (h.start > abs) next = Math.min(next, h.start - base);
+      }
+      out.push(<Text key={`${keyBase}-t${pos}`}>{text.slice(pos, next)}</Text>);
+      pos = next;
+    }
+  }
+  return out;
+}
+
+function renderHighlightedRuns(
+  inlines: Inline[], h: InlineHandlers, hls: Highlight[], ctx: { offset: number }, key = 'i',
+): React.ReactNode[] {
+  return inlines.map((node, idx) => {
+    const k = `${key}-${idx}`;
+    switch (node.t) {
+      case 'text': {
+        const runs = wrapTextWithHighlights(node.v, ctx.offset, hls, k);
+        ctx.offset += node.v.length;
+        return <Text key={k}>{runs}</Text>;
+      }
+      case 'em':
+        return (
+          <Text key={k} style={node.kind === 'strong'
+            ? { fontWeight: '700', color: SEP_COLORS.textBright }
+            : { fontStyle: 'italic' }}>
+            {renderHighlightedRuns(node.children, h, hls, ctx, k)}
+          </Text>
+        );
+      case 'styled': {
+        if (node.style === 'quote') {
+          return <Text key={k}>{'“'}{renderHighlightedRuns(node.children, h, hls, ctx, k)}{'”'}</Text>;
+        }
+        const s = node.style === 'underline' ? { textDecorationLine: 'underline' as const }
+          : node.style === 'strike' ? { textDecorationLine: 'line-through' as const }
+          : node.style === 'small' ? { fontSize: sepText.body.fontSize! * 0.85 }
+          : {};
+        return <Text key={k} style={s}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
+      }
+      case 'link':
+        return (
+          <Text key={k} style={linkStyle} onPress={() => h.onLinkPress?.(node.href, node.wl)}>
+            {renderHighlightedRuns(node.children, h, hls, ctx, k)}
+          </Text>
+        );
+      case 'sup':
+        return <Text key={k} style={{ fontSize: sepText.body.fontSize! * 0.75 }}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
+      case 'sub':
+        return <Text key={k} style={{ fontSize: sepText.body.fontSize! * 0.75 }}>{renderHighlightedRuns(node.children, h, hls, ctx, k)}</Text>;
+      case 'code': {
+        ctx.offset += node.v.length;
+        return <Text key={k} style={{ fontFamily: 'monospace', color: SEP_COLORS.textBright }}>{node.v}</Text>;
+      }
+      case 'fnref':
+        return (
+          <Text key={k} style={fnStyle} onPress={() => h.onFootnotePress?.(node.href, node.label)}>
+            {node.label}
+          </Text>
+        );
       default:
         return null;
     }
@@ -131,12 +229,18 @@ interface Props {
   inlines: Inline[];
   handlers: InlineHandlers;
   baseStyle?: object;
+  // Annotation ranges over this run's plain text. Only honored on the no-math
+  // fast path; math paragraphs fall back to a whole-paragraph indicator upstream.
+  highlights?: Highlight[];
 }
 
-export function InlineContent({ inlines, handlers, baseStyle }: Props) {
+export function InlineContent({ inlines, handlers, baseStyle, highlights }: Props) {
   const style = { ...sepText.body, ...baseStyle };
   if (!hasMath(inlines)) {
-    return <Text style={style}>{renderTextRuns(inlines, handlers)}</Text>;
+    const runs = highlights && highlights.length
+      ? renderHighlightedRuns(inlines, handlers, highlights, { offset: 0 })
+      : renderTextRuns(inlines, handlers);
+    return <Text style={style}>{runs}</Text>;
   }
   const tokens: React.ReactNode[] = [];
   flattenToTokens(inlines, handlers, style, tokens, { n: 0 });

@@ -1,16 +1,91 @@
-import React from 'react';
-import { Text, View, type LayoutChangeEvent } from 'react-native';
-import type { Block } from '../types';
-import { InlineContent, InlineHandlers } from './Inline';
+import React, { useState } from 'react';
+import { Text, View, Image, Pressable, type LayoutChangeEvent } from 'react-native';
+import type { Block, Inline } from '../types';
+import type { Annotation } from '../../../types';
+import { InlineContent, InlineHandlers, type Highlight } from './Inline';
 import { MathSvg } from './MathSvg';
 import { SEP_COLORS, sepBlock, sepText } from './theme';
 
 export interface BlockHandlers extends InlineHandlers {
-  // Section headings report their y-offset for scroll-spy / TOC jump.
   onHeadingLayout?: (id: string, y: number) => void;
   // Fallback for `unsupported` blocks (nested tables, animated SVG). The screen
   // supplies a scoped WebView; if absent we show a quiet placeholder.
   renderFallback?: (html: string) => React.ReactNode;
+  // Resolve a relative image src to an absolute URI. Return null to skip the image.
+  resolveImageSrc?: (src: string) => string | null;
+  // Annotations to highlight. Painted on the exact matched span within a
+  // paragraph (no-math fast path), or as a whole-paragraph left border on
+  // math paragraphs where character offsets can't be mapped.
+  annotations?: Annotation[];
+  onAnnotationPress?: (ann: Annotation) => void;
+  // Long-press on a paragraph triggers this with its plain text.
+  onAnnotationCreate?: (text: string) => void;
+}
+
+// Article figure that sizes itself to the image's intrinsic aspect ratio,
+// rather than a fixed height that letterboxes tall diagrams and crops wide ones.
+// Starts at a neutral aspect ratio and updates once the natural size is known.
+function ArticleImage({ uri, alt }: { uri: string; alt?: string }) {
+  const [aspect, setAspect] = useState<number | null>(null);
+  return (
+    <Image
+      source={{ uri }}
+      style={aspect ? { width: '100%', aspectRatio: aspect } : { width: '100%', height: 180 }}
+      resizeMode="contain"
+      onLoad={(e) => {
+        const { width, height } = e.nativeEvent.source;
+        if (width > 0 && height > 0) setAspect(width / height);
+      }}
+      accessibilityLabel={alt || undefined}
+    />
+  );
+}
+
+// Extract plain text from an inline tree for annotation matching. Must count the
+// same characters that Inline's highlight renderer advances its offset over.
+function inlineText(inlines: Inline[]): string {
+  return inlines.map(n => {
+    if (n.t === 'text') return n.v;
+    if (n.t === 'code') return n.v;
+    if ('children' in n && Array.isArray(n.children)) return inlineText(n.children as Inline[]);
+    return '';
+  }).join('');
+}
+
+function hasMathNode(inlines: Inline[]): boolean {
+  for (const n of inlines) {
+    if (n.t === 'math') return true;
+    if ('children' in n && Array.isArray(n.children) && hasMathNode(n.children as Inline[])) return true;
+  }
+  return false;
+}
+
+// Resolve the annotations that match this paragraph into non-overlapping
+// character ranges over its plain text. Skips empty selections (which would
+// otherwise match every paragraph) and supports multiple highlights per
+// paragraph, each matched to its own occurrence.
+function annotationHighlights(paraText: string, h: BlockHandlers): Highlight[] {
+  const anns = (h.annotations ?? []).filter(a => a.selected_text && a.selected_text.trim());
+  if (!anns.length) return [];
+  const ranges: Highlight[] = [];
+  for (const a of anns) {
+    const idx = paraText.indexOf(a.selected_text);
+    if (idx >= 0) {
+      ranges.push({
+        start: idx,
+        end: idx + a.selected_text.length,
+        color: a.color + '55', // translucent fill over the matched span
+        onPress: () => h.onAnnotationPress?.(a),
+      });
+    }
+  }
+  ranges.sort((x, y) => x.start - y.start);
+  const out: Highlight[] = [];
+  let lastEnd = -1;
+  for (const r of ranges) {
+    if (r.start >= lastEnd) { out.push(r); lastEnd = r.end; }
+  }
+  return out;
 }
 
 function Blocks({ blocks, h, keyPrefix = 'b' }: { blocks: Block[]; h: BlockHandlers; keyPrefix?: string }) {
@@ -38,31 +113,62 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
       );
     }
     case 'para': {
+      // Only walk the inline tree for text when we actually need it (any
+      // annotations present, or long-press creation is enabled).
+      const needsText = (h.annotations?.length ?? 0) > 0 || !!h.onAnnotationCreate;
+      const paraText = needsText ? inlineText(block.children) : '';
+      const paraMath = hasMathNode(block.children);
+      // Precise inline highlights only work on the no-math fast path (where the
+      // renderer can map character offsets); math paragraphs fall back to a
+      // whole-paragraph left border keyed to the first matching annotation.
+      const highlights = !paraMath ? annotationHighlights(paraText, h) : [];
+      const borderAnn = paraMath
+        ? (h.annotations ?? []).find(a => a.selected_text && a.selected_text.trim() && paraText.includes(a.selected_text))
+        : undefined;
+
       // Display math (\[…\]) parses as an inline node but renders as a centered
       // block, so split the paragraph around any display-math nodes.
       const hasDisplay = block.children.some(c => c.t === 'math' && c.display);
+      let inner: React.ReactNode;
       if (!hasDisplay) {
+        inner = <InlineContent inlines={block.children} handlers={h} highlights={highlights} />;
+      } else {
+        const segments: React.ReactNode[] = [];
+        let run: typeof block.children = [];
+        const flush = (key: string) => {
+          if (run.length) { segments.push(<InlineContent key={key} inlines={run} handlers={h} />); run = []; }
+        };
+        block.children.forEach((c, i) => {
+          if (c.t === 'math' && c.display) {
+            flush(`r${i}`);
+            segments.push(<MathSvg key={`dm${i}`} tex={c.tex} display resolve={h.resolveMath} />);
+          } else {
+            run.push(c);
+          }
+        });
+        flush('rEnd');
+        inner = <>{segments}</>;
+      }
+
+      // Wrap in a Pressable when long-press creation is on, or when a math
+      // paragraph needs the border + tap-to-edit fallback. No-math paragraphs
+      // get their tap targets from the inline highlight spans themselves.
+      if (h.onAnnotationCreate || borderAnn) {
         return (
-          <View style={sepBlock.paraGap}>
-            <InlineContent inlines={block.children} handlers={h} />
-          </View>
+          <Pressable
+            style={[
+              sepBlock.paraGap,
+              borderAnn && { borderLeftWidth: 3, borderLeftColor: borderAnn.color, paddingLeft: 10 },
+            ]}
+            onPress={borderAnn ? () => h.onAnnotationPress?.(borderAnn) : undefined}
+            onLongPress={h.onAnnotationCreate ? () => h.onAnnotationCreate!(paraText) : undefined}
+            delayLongPress={600}
+          >
+            {inner}
+          </Pressable>
         );
       }
-      const segments: React.ReactNode[] = [];
-      let run: typeof block.children = [];
-      const flush = (key: string) => {
-        if (run.length) { segments.push(<InlineContent key={key} inlines={run} handlers={h} />); run = []; }
-      };
-      block.children.forEach((c, i) => {
-        if (c.t === 'math' && c.display) {
-          flush(`r${i}`);
-          segments.push(<MathSvg key={`dm${i}`} tex={c.tex} display resolve={h.resolveMath} />);
-        } else {
-          run.push(c);
-        }
-      });
-      flush('rEnd');
-      return <View style={sepBlock.paraGap}>{segments}</View>;
+      return <View style={sepBlock.paraGap}>{inner}</View>;
     }
     case 'blockquote':
       return (
@@ -121,10 +227,15 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
       );
     case 'rule':
       return <View style={{ height: 1, backgroundColor: SEP_COLORS.border, marginVertical: 20 }} />;
-    case 'image':
-      // Raster images (equation pngs / icons) resolved by the screen later; for
-      // now omit rather than show a broken box. Display math uses SVG, not <img>.
-      return null;
+    case 'image': {
+      const uri = h.resolveImageSrc?.(block.src) ?? null;
+      if (!uri) return null;
+      return (
+        <View style={{ alignItems: 'center', marginVertical: 12 }}>
+          <ArticleImage uri={uri} alt={block.alt} />
+        </View>
+      );
+    }
     case 'unsupported':
       return <>{h.renderFallback ? h.renderFallback(block.html) : (
         <View style={{ padding: 12, backgroundColor: SEP_COLORS.bgRaised, borderRadius: 6, marginVertical: 12 }}>

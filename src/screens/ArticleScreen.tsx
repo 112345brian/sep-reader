@@ -5,9 +5,6 @@ import {
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring, runOnJS,
-} from 'react-native-reanimated';
 import WebView from 'react-native-webview';
 import type { WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,7 +20,10 @@ import { fetchAndCacheArticle } from '../services/catalog';
 import { primeBackfillForSlugs } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
-import { SepArticle } from '../utils/sepHtml/render/SepArticle';
+import { SepArticle, type SepArticleHandle } from '../utils/sepHtml/render/SepArticle';
+import { InlineContent } from '../utils/sepHtml/render/Inline';
+import { resolveMath, hydrateMath, collectMathNodes } from '../utils/sepHtml/render/mathStore';
+import type { Inline } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet from '../components/TocSheet';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
@@ -48,11 +48,7 @@ interface PendingAnnotation {
 
 const SEP_BASE = 'https://plato.stanford.edu';
 
-// Flag-gated native renderer (off by default — WebView remains the default
-// reading surface). When on, the article body renders via the custom native
-// parser/renderer instead of the WebView. Math resolves to null here (TeX-text
-// fallback) until the build-time math store is wired through the content DB.
-const USE_NATIVE_RENDERER = false;
+const USE_NATIVE_RENDERER = true;
 
 // ── Icon helpers ───────────────────────────────────────────────────────────
 
@@ -132,10 +128,6 @@ function IconGraph({ color = '#9a9a9a' }: { color?: string }) {
 
 export default function ArticleScreen() {
   const insets = useSafeAreaInsets();
-  const screenX = useSharedValue(0);
-  const animatedScreenStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: screenX.value }],
-  }));
   const nav = useNavigation<Nav>();
   const { slug, title, fromSlug = null } = useRoute<Route>().params;
 
@@ -147,7 +139,8 @@ export default function ArticleScreen() {
   const [orphanDismissed, setOrphanDismissed] = useState(false);
   const [showToc, setShowToc] = useState(false);
   const [showOverflow, setShowOverflow] = useState(false);
-  const [footnote, setFootnote] = useState<{ text: string } | null>(null);
+  const [footnote, setFootnote] = useState<{ inlines: Inline[] } | null>(null);
+  const [backlinkCount, setBacklinkCount] = useState(0);
 
   // Native-renderer AST (only parsed when the flag is on and content is ready).
   // Key only on content_html — not the whole state object — so unrelated state
@@ -161,6 +154,17 @@ export default function ArticleScreen() {
     [state.phase, readyContentHtml],
   );
 
+  // Warm the math SVG cache from SQLite after parse so repeat visits skip re-render.
+  // The parsed AST is the source of truth for whether math is present: collecting
+  // zero nodes (the ~76% math-free case) makes hydrateMath a no-op. We deliberately
+  // don't gate on the stored has_math flag — articles cached before that column
+  // existed default to 0 and would wrongly skip warm-up.
+  useEffect(() => {
+    if (!nativeArticle) return;
+    const nodes = collectMathNodes(nativeArticle.blocks);
+    if (nodes.length) hydrateMath(nodes).catch(() => {});
+  }, [nativeArticle]);
+
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
   const modalAnnotation =
@@ -169,6 +173,7 @@ export default function ArticleScreen() {
       : editingAnnotation ?? null;
 
   const webRef = useRef<any>(null);
+  const nativeArticleRef = useRef<SepArticleHandle>(null);
   // Always-current snapshot of annotations for use in callbacks that can't
   // take a dep on annotations without causing stale-closure bugs (handleLoadEnd).
   const annotationsRef = useRef<Annotation[]>([]);
@@ -182,6 +187,7 @@ export default function ArticleScreen() {
   async function load(forceRefetch = false) {
     setState({ phase: 'loading' });
     setWebReady(false);
+    setBacklinkCount(0);
 
     let entry = forceRefetch ? null : await getEntry(slug);
 
@@ -208,7 +214,7 @@ export default function ArticleScreen() {
     setOrphaned(stale);
     setOrphanDismissed(false);
 
-    await recordRead(slug, entry.title, fromSlug);
+    recordRead(slug, entry.title, fromSlug).catch(() => {});
     // Both fire-and-forget — don't block article render.
     indexLinks(slug, entry.content_html ?? '').catch(() => {});
     // Prime InPhO date backfill: active article first, then reading history,
@@ -227,7 +233,7 @@ export default function ArticleScreen() {
     setState({
       phase: 'ready',
       entry,
-      html: buildArticleHtml({
+      html: USE_NATIVE_RENDERER ? '' : buildArticleHtml({
         slug: entry.slug,
         title: entry.title,
         parentLabel: entry.parent_label,
@@ -240,9 +246,12 @@ export default function ArticleScreen() {
       }),
     });
 
-    // Inject backlink count after article is ready (non-blocking).
+    // Show backlink count after article is ready (non-blocking). The native
+    // renderer reads backlinkCount to draw a "Related by link" footer row; the
+    // WebView path injects the row into the document.
     getLinksTo(slug).then(backlinks => {
-      if (backlinks.length > 0) {
+      setBacklinkCount(backlinks.length);
+      if (!USE_NATIVE_RENDERER && backlinks.length > 0) {
         webRef.current?.injectJavaScript(
           `(function(){var r=document.querySelector('.backlinks-row');` +
           `if(r){r.querySelector('.backlinks-badge').textContent=${JSON.stringify(String(backlinks.length))};r.style.display='';}` +
@@ -281,7 +290,7 @@ export default function ArticleScreen() {
         const ann = annotations.find(a => a.id === msg.id);
         if (ann) setEditingAnnotation(ann);
       } else if (msg.type === 'footnote') {
-        if (msg.text) setFootnote({ text: msg.text });
+        if (msg.text) setFootnote({ inlines: [{ t: 'text', v: msg.text }] });
       }
     } catch {}
   }, [annotations, slug, title, nav]);
@@ -362,42 +371,45 @@ export default function ArticleScreen() {
   };
 
   const handleTocJump = (href: string) => {
-    webRef.current?.injectJavaScript(
-      `(function(){var el=document.getElementById(${JSON.stringify(href)});if(el)el.scrollIntoView({behavior:'smooth'});})();true;`
-    );
+    if (USE_NATIVE_RENDERER) {
+      nativeArticleRef.current?.scrollToSection(href);
+    } else {
+      webRef.current?.injectJavaScript(
+        `(function(){var el=document.getElementById(${JSON.stringify(href)});if(el)el.scrollIntoView({behavior:'smooth'});})();true;`
+      );
+    }
   };
+
+  // Link handling for the native renderer. Mirrors the WebView's handleNav so
+  // cross-article, in-page anchor, and external links behave the same regardless
+  // of USE_NATIVE_RENDERER.
+  const handleNativeLink = useCallback((href: string) => {
+    if (!href) return;
+    // In-page anchor (#section, bibliography back-ref) → scroll within the article.
+    if (href.startsWith('#')) {
+      nativeArticleRef.current?.scrollToSection(href.slice(1));
+      return;
+    }
+    // Cross-article SEP link, absolute or relative (e.g. ../other-article/).
+    const sepEntry = href.match(/(?:\/entries\/|^\.\.\/)([a-z0-9-]+)\//);
+    if (sepEntry) {
+      const target = sepEntry[1];
+      if (target !== slug) nav.push('Article', { slug: target, title: target, fromSlug: slug });
+      else nativeArticleRef.current?.scrollToSection(href.replace(/^[^#]*#?/, ''));
+      return;
+    }
+    // Everything else external → open in the system browser.
+    if (href.startsWith('http')) Linking.openURL(href).catch(() => {});
+  }, [slug, nav]);
 
   const displayTitle = state.phase === 'ready' ? state.entry.title : title;
 
   const openGraph = () =>
     nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle });
 
-  const navBack = useCallback(() => nav.goBack(), [nav]);
   const navBackTop = useCallback(() => nav.popToTop(), [nav]);
 
-  // ── Gestures (non-overlapping zones so the WebView keeps its own scroll) ──
-
-  // Swipe RIGHT anywhere in the reading area → home. Cancels if the drag is
-  // vertical-first (failOffsetY), so normal article scrolling is untouched.
-  const swipeHome = Gesture.Pan()
-    .activeOffsetX([-9999, 30])
-    .failOffsetY([-22, 22])
-    .onUpdate(e => {
-      'worklet';
-      if (e.translationX > 0) screenX.value = e.translationX;
-    })
-    .onEnd(e => {
-      'worklet';
-      if (e.translationX > 80 && e.velocityX > 150) {
-        // Reset immediately and let React Navigation drive the back transition.
-        // Springing to 500 first leaves a blank #111 frame because the native
-        // stack detaches the previous screen — nothing is rendered behind us.
-        screenX.value = withSpring(0, { damping: 30, stiffness: 400 });
-        runOnJS(navBack)();
-      } else {
-        screenX.value = withSpring(0, { damping: 22, stiffness: 260 });
-      }
-    });
+  // ── Gestures ──
 
   // Swipe DOWN on the header → graph view (mockup: "swipe down from top").
   const swipeGraph = Gesture.Pan()
@@ -418,7 +430,7 @@ export default function ArticleScreen() {
   const tocGesture = Gesture.Exclusive(tocSwipe, tocTap);
 
   return (
-    <Animated.View style={[styles.root, animatedScreenStyle]}>
+    <View style={styles.root}>
       {/* ── App bar (swipe down → graph) ── */}
       <GestureDetector gesture={swipeGraph}>
       <View style={[styles.appBar, { paddingTop: insets.top }]}>
@@ -497,8 +509,6 @@ export default function ArticleScreen() {
             />
           )}
 
-          {/* ── WebView (swipe right → home) ── */}
-          <GestureDetector gesture={swipeHome}>
           <View style={styles.webWrap}>
             {!webReady && !USE_NATIVE_RENDERER && (
               <View style={styles.webOverlay}>
@@ -507,19 +517,40 @@ export default function ArticleScreen() {
             )}
             {USE_NATIVE_RENDERER && nativeArticle ? (
               <SepArticle
+                ref={nativeArticleRef}
                 article={nativeArticle}
-                resolveMath={() => null}
-                onLinkPress={(href) => {
-                  const m = href.match(/\/entries\/([a-z0-9-]+)\/?/);
-                  if (m && m[1] !== slug) nav.push('Article', { slug: m[1], title: m[1], fromSlug: slug });
+                resolveMath={resolveMath}
+                onLinkPress={handleNativeLink}
+                onFootnotePress={(fnHref) => {
+                  const id = fnHref.startsWith('#') ? fnHref.slice(1) : fnHref;
+                  const inlines = nativeArticle.footnotes[id];
+                  if (inlines && inlines.length) setFootnote({ inlines });
                 }}
-                onFootnotePress={() => { /* footnote text wiring lands with the AST footnote map */ }}
                 onProgress={(v) => setReadProgress(slug, v).catch(() => {})}
+                resolveImageSrc={(src) => {
+                  if (src.startsWith('http')) return src;
+                  if (src.startsWith('/')) return `${SEP_BASE}${src}`;
+                  return `${SEP_BASE}/entries/${slug}/${src}`;
+                }}
+                annotations={annotations}
+                onAnnotationPress={(ann) => setEditingAnnotation(ann)}
+                onAnnotationCreate={(text) => {
+                  setPendingAnnotation({ selected_text: text, context: null, color: '#fbbf24' });
+                }}
+                footer={backlinkCount > 0 ? (
+                  <TouchableOpacity
+                    style={styles.backlinksRow}
+                    onPress={() => nav.navigate('Graph', { centerSlug: slug, centerTitle: displayTitle })}
+                  >
+                    <Text style={styles.backlinksLabel}>Related by link</Text>
+                    <Text style={styles.backlinksBadge}>{backlinkCount}</Text>
+                  </TouchableOpacity>
+                ) : null}
               />
             ) : (
             <WebView
               ref={webRef}
-              source={{ html: state.html, baseUrl: SEP_BASE }}
+              source={{ html: state.html, baseUrl: `${SEP_BASE}/entries/${slug}/` }}
               style={styles.web}
               originWhitelist={['*']}
               onShouldStartLoadWithRequest={handleNav}
@@ -541,7 +572,6 @@ export default function ArticleScreen() {
               </View>
             </GestureDetector>
           </View>
-          </GestureDetector>
 
           {/* ── TOC Sheet ── */}
           {showToc && (
@@ -562,7 +592,7 @@ export default function ArticleScreen() {
           <View style={[styles.fnSheet, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.fnHandle} />
             <Text style={styles.fnLabel}>NOTE</Text>
-            <Text style={styles.fnText}>{footnote.text}</Text>
+            <InlineContent inlines={footnote.inlines} handlers={{ resolveMath }} baseStyle={styles.fnText} />
           </View>
         </Pressable>
       )}
@@ -576,7 +606,7 @@ export default function ArticleScreen() {
           setEditingAnnotation(null);
         }}
       />
-    </Animated.View>
+    </View>
   );
 }
 
@@ -726,6 +756,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#c0c0c0',
     lineHeight: 22,
+  },
+
+  backlinksRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 28,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#262626',
+    backgroundColor: '#161616',
+  },
+  backlinksLabel: { color: '#5b8ef5', fontSize: 14, fontWeight: '600' },
+  backlinksBadge: {
+    color: '#9a9a9a',
+    fontSize: 13,
+    fontWeight: '600',
+    minWidth: 22,
+    textAlign: 'center',
+    paddingVertical: 1,
+    paddingHorizontal: 7,
+    borderRadius: 10,
+    backgroundColor: '#222',
+    overflow: 'hidden',
   },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
