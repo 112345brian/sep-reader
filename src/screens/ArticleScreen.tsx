@@ -25,7 +25,7 @@ import { ArticleHeader } from '../utils/sepHtml/render/ArticleHeader';
 import { InlineContent } from '../utils/sepHtml/render/Inline';
 import type { Inline, Block } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
-import TocSheet from '../components/TocSheet';
+import TocSheet, { TOC_SHEET_H } from '../components/TocSheet';
 import { parseToc } from '../utils/parseToc';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
 import type { EntryRow, Annotation } from '../types';
@@ -203,7 +203,6 @@ export default function ArticleScreen() {
   const [orphaned, setOrphaned] = useState<Annotation[]>([]);
   const [orphanDismissed, setOrphanDismissed] = useState(false);
   const [showToc, setShowToc] = useState(false);
-  const TOC_SHEET_H = 350;
   const tocSlideAnim = useRef(new Animated.Value(TOC_SHEET_H)).current;
   const [showOverflow, setShowOverflow] = useState(false);
   const [footnote, setFootnote] = useState<{ inlines: Inline[] } | null>(null);
@@ -543,7 +542,7 @@ export default function ArticleScreen() {
       damping: 28,
       stiffness: 320,
       mass: 0.9,
-    }).start(() => setShowToc(false));
+    }).start(({ finished }) => { if (finished) setShowToc(false); });
   }, [tocSlideAnim]);
 
   // Bottom handle: tap (Pressable — instant) or swipe up (Pan gesture).

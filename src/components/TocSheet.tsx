@@ -20,6 +20,8 @@ const C = {
   accentBorder: 'rgba(91,142,245,.35)',
 };
 
+export const TOC_SHEET_H = 350;
+
 // ── Props ──────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -46,7 +48,7 @@ export default function TocSheet({ tocHtml, annotations, slideAnim, onClose, onT
   const tocItems = tocHtml ? parseToc(tocHtml) : [];
 
   const backdropOpacity = slideAnim.interpolate({
-    inputRange: [0, 350],
+    inputRange: [0, TOC_SHEET_H],
     outputRange: [0.55, 0],
     extrapolate: 'clamp',
   });
