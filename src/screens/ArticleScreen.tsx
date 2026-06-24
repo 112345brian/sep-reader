@@ -161,8 +161,9 @@ export default function ArticleScreen() {
   const [footnote, setFootnote] = useState<{ inlines: Inline[] } | null>(null);
   const [backlinkCount, setBacklinkCount] = useState(0);
 
-  // Native-renderer AST — parsed after the navigation animation finishes so
-  // the incoming transition isn't blocked by the synchronous HTML parse.
+  // Native-renderer AST — deferred past the navigation animation, with math
+  // warmed from DB *before* setNativeArticle so the render never calls MathJax
+  // synchronously (all equations are cache hits in the in-memory map).
   const [nativeArticle, setNativeArticle] = useState<ReturnType<typeof parseSepHtml> | null>(null);
   const readyContentHtml = state.phase === 'ready' ? state.entry.content_html : null;
   useEffect(() => {
@@ -171,23 +172,21 @@ export default function ArticleScreen() {
       return;
     }
     const html = state.entry.content_html ?? '';
+    let cancelled = false;
     const task = InteractionManager.runAfterInteractions(() => {
-      setNativeArticle(parseSepHtml(html));
+      const parsed = parseSepHtml(html);
+      const nodes = collectMathNodes(parsed.blocks);
+      if (!nodes.length) {
+        if (!cancelled) setNativeArticle(parsed);
+        return;
+      }
+      hydrateMath(nodes)
+        .catch(() => {})
+        .then(() => { if (!cancelled) setNativeArticle(parsed); });
     });
-    return () => task.cancel();
+    return () => { cancelled = true; task.cancel(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.phase, readyContentHtml]);
-
-  // Warm the math SVG cache from SQLite after parse so repeat visits skip re-render.
-  // The parsed AST is the source of truth for whether math is present: collecting
-  // zero nodes (the ~76% math-free case) makes hydrateMath a no-op. We deliberately
-  // don't gate on the stored has_math flag — articles cached before that column
-  // existed default to 0 and would wrongly skip warm-up.
-  useEffect(() => {
-    if (!nativeArticle) return;
-    const nodes = collectMathNodes(nativeArticle.blocks);
-    if (nodes.length) hydrateMath(nodes).catch(() => {});
-  }, [nativeArticle]);
 
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);

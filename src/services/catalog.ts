@@ -1,6 +1,37 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, putMathBatch } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
+import { parseSepHtml } from '../utils/sepHtml/parse';
+import { collectMathNodes, mathHash } from '../utils/sepHtml/render/mathStore';
+import { texToSvg } from '../utils/sepHtml/render/texToSvg';
+
+// Render all math equations in a fetched article to SVG and store in the local
+// DB. Fire-and-forget from fetchAndCacheArticle so first open is fast: by the
+// time the user taps through, hydrateMath loads all SVGs from DB into the
+// in-memory cache and resolveMath never calls MathJax during render.
+// Yields every 10 equations so the JS thread stays responsive during bulk download.
+async function prerenderMath(contentHtml: string): Promise<void> {
+  const parsed = parseSepHtml(contentHtml);
+  const nodes = collectMathNodes(parsed.blocks);
+  if (!nodes.length) return;
+
+  const seen = new Set<string>();
+  const toStore: Array<{ hash: string; svg: string; w: number; h: number; display: boolean }> = [];
+
+  for (let i = 0; i < nodes.length; i++) {
+    if (i > 0 && i % 10 === 0) await new Promise<void>(r => setTimeout(r, 0));
+    const { tex, display } = nodes[i];
+    const key = mathHash(tex, display);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const result = texToSvg(tex, display);
+    if (!('error' in result)) {
+      toStore.push({ hash: key, svg: result.svg, w: result.width ?? 1, h: result.height ?? 1, display });
+    }
+  }
+
+  await putMathBatch(toStore);
+}
 
 const BASE = 'https://plato.stanford.edu';
 const INDEX_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -128,6 +159,10 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
     });
     // Index outgoing links for graph view
     indexLinks(slug, contentHtml).catch(() => {});
+    // Pre-render math to SVG so first open never pays the synchronous MathJax cost
+    if (linkedHtml.includes('\\(') || linkedHtml.includes('\\[')) {
+      prerenderMath(linkedHtml).catch(() => {});
+    }
     return true;
   } catch {
     return false;
