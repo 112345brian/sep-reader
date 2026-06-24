@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.2] — 2026-06-24
+
+### Fixed
+- **Alphabet scrubber jump didn't scroll for most letters** — on the Browse tab, tapping or dragging the A–Z scrubber only jumped for letters near the top; everything below silently stayed put. Two causes: (1) the drag expanded every letter it passed over, ballooning the target section's row index out of reach, and (2) `SectionList` has no `getItemLayout`, so `scrollToLocation` to an unmeasured section failed — and failure doesn't advance the list, so retrying alone was futile. The scrubber no longer expands sections while jumping, and `onScrollToIndexFailed` now seeks approximately via `averageItemLength × index` before retrying `scrollToLocation` to land precisely (bounded to 12 tries). Verified on device.
+
+## [0.6.1] — 2026-06-24
+
+### Added
+- **Lazy-loaded browse sections** — each letter group in Browse now renders only its first 15 entries up front, expanding to the full list when you scroll its last visible row into view. Cuts the initial Browse mount from ~1,800 rows to a few hundred.
+
+### Changed
+- **Alphabet scrubber migrated to RNGH** — the A–Z scrubber now uses `react-native-gesture-handler`'s `Gesture.Pan` instead of the legacy `PanResponder`, fixing dropped touches and aligning it with the rest of the app's gesture handling.
+
+### Fixed
+- **TOC sheet close-animation race** — `closeToc`'s spring callback now checks `finished` before hiding the sheet, so starting a new swipe-up while the close animation is running (which calls `stopAnimation()`) no longer collapses the sheet mid-open.
+- **Duplicated sheet-height constant** — `TOC_SHEET_H` is now exported from `TocSheet` and imported by `ArticleScreen` instead of being redefined as a bare `350` in two places.
+
 ## [0.6.0] — 2026-06-24
 
 ### Changed
