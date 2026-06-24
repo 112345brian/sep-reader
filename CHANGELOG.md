@@ -1,11 +1,11 @@
 # Changelog
 
-## [0.6.2] — 2026-06-24
+## [0.6.2]
 
 ### Fixed
 - **Alphabet scrubber jump didn't scroll for most letters** — on the Browse tab, tapping or dragging the A–Z scrubber only jumped for letters near the top; everything below silently stayed put. Two causes: (1) the drag expanded every letter it passed over, ballooning the target section's row index out of reach, and (2) `SectionList` has no `getItemLayout`, so `scrollToLocation` to an unmeasured section failed — and failure doesn't advance the list, so retrying alone was futile. The scrubber no longer expands sections while jumping, and `onScrollToIndexFailed` now seeks approximately via `averageItemLength × index` before retrying `scrollToLocation` to land precisely (bounded to 12 tries). Verified on device.
 
-## [0.6.1] — 2026-06-24
+## [0.6.1]
 
 ### Added
 - **Lazy-loaded browse sections** — each letter group in Browse now renders only its first 15 entries up front, expanding to the full list when you scroll its last visible row into view. Cuts the initial Browse mount from ~1,800 rows to a few hundred.
@@ -17,7 +17,7 @@
 - **TOC sheet close-animation race** — `closeToc`'s spring callback now checks `finished` before hiding the sheet, so starting a new swipe-up while the close animation is running (which calls `stopAnimation()`) no longer collapses the sheet mid-open.
 - **Duplicated sheet-height constant** — `TOC_SHEET_H` is now exported from `TocSheet` and imported by `ArticleScreen` instead of being redefined as a bare `350` in two places.
 
-## [0.6.0] — 2026-06-24
+## [0.6.0]
 
 ### Changed
 - **Bookmark icon tap/long-press** — tapping the icon on a home-screen row immediately toggles the bookmark with no confirmation modal. Long-pressing opens a modal to mark the article as read or unread.
@@ -42,7 +42,7 @@
 - **O(n) `astKey`** — was serializing the full AST JSON on every render for comparison; now keyed by `slug:content_hash`.
 - **`indexLinks` and backfill priming blocking navigation** — deferred to `InteractionManager.runAfterInteractions` so they no longer compete with the navigation animation.
 
-## [0.5.0] — 2026-06-23
+## [0.5.0]
 
 ### Added
 - **Images in native renderer** — `case 'image'` blocks now render via RN `<Image>`, sized to each figure's intrinsic aspect ratio (`onLoad` → `aspectRatio`) instead of a fixed 180 px box, with relative srcs resolved against `https://plato.stanford.edu/entries/{slug}/`. Previously all article figures were silently dropped.
@@ -65,14 +65,14 @@
 - **Swipe-right to go back** — removed the custom Pan gesture and `gestureEnabled: false` override; the native iOS stack back-swipe now handles this directly with no competing recognizer.
 - **Cross-article links opening Safari** — the WebView `baseUrl` was set to `https://plato.stanford.edu` (root), so relative links in cached article HTML (e.g. `../other-article/`) resolved to `/other-article/` instead of `/entries/other-article/`. They missed the intercept regex and fell through to `Linking.openURL`. Fixed by setting `baseUrl` to `https://plato.stanford.edu/entries/<slug>/`, matching the original page location.
 
-## [0.4.1] — 2026-06-23
+## [0.4.1]
 
 ### Fixed
 - **Article loading spinner on cached articles** — article now renders immediately after the DB read; backlink count loads in the background and injects via JS.
 - **10-second input lag** — `indexLinks` was issuing 100–200 sequential SQLite bridge calls per article open, flooding the JS event queue. Now a single batch INSERT.
 - **Missing index on `links.to_slug`** — `getLinksTo` was doing a full table scan; added `idx_links_to_slug`.
 
-## [0.4.0] — 2026-06-23
+## [0.4.0]
 
 ### Added
 - **Sub-entry parent breadcrumb** — entries that belong to a parent group (e.g. "Nietzsche's Aesthetics" under "aesthetics") now show the parent label as a small blue tag above the article title and in list rows (search results, history, bookmarks, links). The tag uses the same pill style as the article breadcrumb. Standalone entries (e.g. "Anarchism") are unaffected.
@@ -97,7 +97,7 @@
 ### Changed
 - `htmlparser2` pinned to `^9.1.0` (dual CJS/ESM) for clean Metro/Jest resolution; v12 is ESM-only.
 
-## [0.3.1] — 2026-06-23
+## [0.3.1]
 
 ### Added
 - **GPL-3.0 license** (`LICENSE`) for the project's own source code.
@@ -108,7 +108,7 @@
 ### Fixed
 - Corrected README/feature copy that described the injected reading styles as "SEP CSS"; the reader CSS is our own purpose-built stylesheet, not Stanford's.
 
-## [0.3.0] — 2026-06-23
+## [0.3.0]
 
 ### Added
 - **Footnote tap → native bottom sheet** — tapping a footnote superscript now shows the citation text in a native bottom-sheet overlay instead of navigating or doing nothing. The previous handler used `mouseover` + `canShowHoverPreview()`, which always returns false on touch devices.
@@ -132,7 +132,7 @@
   - List item spacing: 0.2em → 0.35em; list bottom margin matches paragraph spacing
   - Blockquote margin increased proportionally
 
-## [0.2.0] — 2026-06-22
+## [0.2.0]
 
 ### Changed
 - **Blind-design UI overhaul** — new dark theme throughout:
@@ -154,7 +154,7 @@
 ### Added
 - `scripts/test-download.mjs` — standalone Node script to verify the SEP download pipeline without running the app
 
-## [0.1.0] — 2026-06-22
+## [0.1.0]
 
 ### Added
 - First-launch onboarding: library mode (lazy vs. download-all) and home screen preference (search vs. continue reading)
@@ -172,7 +172,7 @@
 - Font fallback: Source Serif 4 now falls back to Georgia/Times New Roman if Google Fonts is unavailable
 - App display name changed from "SepReader" to "SEP"
 
-## [0.0.1] — 2026-06-21
+## [0.0.1]
 
 ### Added
 - React Native 0.81.6 bare project with react-native-macos 0.81.7
