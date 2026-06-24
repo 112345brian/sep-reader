@@ -7,10 +7,11 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { getMathSvgMap } from '../services/db';
 import type { EntryRow } from '../types';
 import { parseSepHtml } from '../utils/sepHtml/parse';
+import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';
 import { ArticleHeader } from '../utils/sepHtml/render/ArticleHeader';
 import { BlockView } from '../utils/sepHtml/render/Blocks';
 import { SEP_COLORS, SEP_SIDE_PAD } from '../utils/sepHtml/render/theme';
-import type { Block, Inline } from '../utils/sepHtml/types';
+import type { Block } from '../utils/sepHtml/types';
 
 interface Props {
   phase: 'booting' | 'indexing' | 'index_error';
@@ -23,24 +24,6 @@ type ListItem =
   | { kind: 'block'; block: Block; idx: number }
   | { kind: 'spinner' };
 
-function collectHashes(blocks: Block[], out: string[]) {
-  function fromInlines(inlines: Inline[]) {
-    for (const n of inlines) {
-      if (n.t === 'mathref') out.push(n.hash);
-      if ('children' in n && Array.isArray(n.children)) fromInlines(n.children as Inline[]);
-    }
-  }
-  for (const b of blocks) {
-    if (b.t === 'para' || b.t === 'heading') fromInlines(b.children);
-    else if (b.t === 'blockquote') collectHashes(b.children, out);
-    else if (b.t === 'list') b.items.forEach(item => collectHashes(item, out));
-    else if (b.t === 'deflist') b.rows.forEach(row => { fromInlines(row.term); collectHashes(row.def, out); });
-    else if (b.t === 'table') {
-      if (b.caption) fromInlines(b.caption);
-      b.rows.forEach(row => row.cells.forEach(cell => fromInlines(cell)));
-    }
-  }
-}
 
 function LoadingBar({ phase, downloadProgress }: Pick<Props, 'phase' | 'downloadProgress'>) {
   return (
@@ -93,19 +76,20 @@ function Inner({ phase, downloadProgress, article }: Props) {
   });
 
   useEffect(() => {
+    let cancelled = false;
     if (!article) { setParsed(null); return; }
     if (article.content_ast) {
       try { setParsed(JSON.parse(article.content_ast)); return; } catch {}
     }
     const html = article.content_html ?? '';
     if (!html) return;
-    setTimeout(() => setParsed(parseSepHtml(html)), 0);
+    setTimeout(() => { if (!cancelled) setParsed(parseSepHtml(html)); }, 0);
+    return () => { cancelled = true; };
   }, [article?.slug]);
 
   useEffect(() => {
     if (!parsed) { setMathSvgs({}); return; }
-    const hashes: string[] = [];
-    collectHashes(parsed.blocks, hashes);
+    const hashes = collectMathHashes(parsed.blocks);
     if (!hashes.length) return;
     getMathSvgMap(hashes).then(setMathSvgs).catch(() => {});
   }, [parsed]);

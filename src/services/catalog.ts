@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntry, putMath, getMathSvgMap } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntry, putMath, getMathSvgMap } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 import { renderMathBatch } from './mathRender';
@@ -203,10 +203,7 @@ export async function downloadAll(
   signal?: AbortSignal,
   scope: 'all' | 'sep' | 'owl' = 'all'
 ): Promise<void> {
-  const [uncached, cached] = await Promise.all([
-    getAllUncachedSlugs(scope),
-    getCachedSlugs(scope),
-  ]);
+  const { uncached, cached } = await getSlugsByCacheStatus(scope);
   // Report progress against the full library so a resumed download shows
   // "900 / 1800" rather than "0 / 900", making it clear work wasn't lost.
   const alreadyDone = cached.length;
