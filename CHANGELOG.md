@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+- **Timeline view: oldest at bottom, newest at top** — corrected the y-axis direction so ancient philosophers (e.g. Pythagoras 580 BCE) appear at the bottom and later thinkers (e.g. Aquinas 1225 CE) at the top, matching the natural chronological reading of a vertical timeline.
+- **Timeline horizontal jitter** — nodes whose birth years place them within 28dp of a neighbor now alternate left/right (±12% of canvas width) instead of stacking vertically, keeping the timeline's vertical axis legible while avoiding dot overlap.
+
 ### Added — native renderer foundation (not yet wired into the UI)
 - **Custom SEP HTML parser** (`src/utils/sepHtml/`) — tokenizes stored article HTML into a typed AST (`parse.ts` + `types.ts`) via `htmlparser2`, ahead of replacing the WebView with native React Native rendering. Handles SEP's full tag set: headings (with section ids), paragraphs, lists, definition lists, blockquotes, captioned tables, `.wl` cross-reference links, footnote refs, and inline/deprecated formatting. Nested tables flagged `unsupported` for a scoped WebView fallback. 9 unit tests.
 - **Inline TeX math tokenization** — splits `\(…\)` (inline) and `\[…\]` (display) out of text into `math` AST nodes. A full-corpus audit found 450 articles (~24%) use TeX (122,263 equations, zero MathML) — something a tag census alone would miss.

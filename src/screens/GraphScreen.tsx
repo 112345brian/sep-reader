@@ -1,9 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, PanResponder, Animated,
-  TouchableOpacity, ActivityIndicator, useWindowDimensions,
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
-import Svg, { Line, Circle, G, Text as SvgText, Path } from 'react-native-svg';
+import Svg, { Line, Circle, G, Rect, Text as SvgText, Path } from 'react-native-svg';
+import Reanimated, {
+  useSharedValue, useAnimatedStyle, useAnimatedReaction, runOnJS, withSpring,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -47,7 +50,6 @@ function forceLayout(
     const fy = new Float32Array(n);
     const temp = Math.max(5, (1 - iter / iterations) * 80);
 
-    // Repulsion between all pairs
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         const dx = layout[i].x - layout[j].x || 0.1;
@@ -61,7 +63,6 @@ function forceLayout(
       }
     }
 
-    // Attraction along edges
     for (const edge of edges) {
       const ai = slugIndex.get(edge.from_slug);
       const bi = slugIndex.get(edge.to_slug);
@@ -76,14 +77,12 @@ function forceLayout(
       fx[bi] -= fx_; fy[bi] -= fy_;
     }
 
-    // Gravity toward center
     for (let i = 0; i < n; i++) {
       if (layout[i].slug === centerSlug) continue;
       fx[i] += (W - layout[i].x) * 0.01;
       fy[i] += (H - layout[i].y) * 0.01;
     }
 
-    // Apply with temperature
     for (let i = 0; i < n; i++) {
       if (layout[i].slug === centerSlug) continue;
       const dist = Math.sqrt(fx[i] * fx[i] + fy[i] * fy[i]) || 1;
@@ -98,39 +97,88 @@ function forceLayout(
   return layout;
 }
 
-// Chronological layout for Timeline mode: x = birth year (left=earliest), nodes
-// with no date dropped into an "unknown" lane on the far left. y is staggered to
-// reduce label overlap.
+// Vertical timeline: newest at top (small y), oldest at bottom (large y).
+// Nodes default to center x and jitter left/right only when crowded.
 function timelineLayout(nodes: GraphNode[], width: number, height: number): LayoutNode[] {
   const dated = nodes.filter(n => typeof n.birthYear === 'number');
-  const undatedNodes = nodes.filter(n => typeof n.birthYear !== 'number');
-  const years = dated.map(n => n.birthYear as number);
-  const minY = years.length ? Math.min(...years) : 0;
-  const maxY = years.length ? Math.max(...years) : 1;
-  const span = Math.max(1, maxY - minY);
-  const padX = 70, usableW = Math.max(1, width - padX * 2);
-  const laneH = 46;
-  const lanes = Math.max(3, Math.floor((height - 80) / laneH));
+  const undated = nodes.filter(n => typeof n.birthYear !== 'number');
+
+  if (!dated.length) {
+    return undated.map((n, i) => ({ ...n, x: width / 2, y: 60 + i * 50 }));
+  }
+
+  // Sort ascending so index 0 = oldest (most negative / smallest year)
+  const sorted = [...dated].sort((a, b) => (a.birthYear as number) - (b.birthYear as number));
+  const minYear = sorted[0].birthYear as number;
+  const maxYear = sorted[sorted.length - 1].birthYear as number;
+  const span = Math.max(1, maxYear - minYear);
+
+  const PAD_T = 60;
+  const usableH = Math.max(100, height - PAD_T - 60);
+  const cx = width / 2;
+  const JITTER = width * 0.12; // horizontal nudge per side when crowded
+  const MIN_SEP = 28;          // minimum y gap enforced between adjacent nodes
+
+  // Oldest → BOTTOM (large y = PAD_T + usableH), Newest → TOP (small y = PAD_T)
+  const placed: LayoutNode[] = sorted.map(node => ({
+    ...node,
+    x: cx,
+    y: PAD_T + (maxYear - (node.birthYear as number)) / span * usableH,
+  }));
+
+  // Sort by y ascending (top of screen first) so we can enforce spacing
+  const byY = [...placed].sort((a, b) => a.y - b.y);
+
+  // Push nodes DOWN if too close to the one above (preserves relative order)
+  for (let i = 1; i < byY.length; i++) {
+    if (byY[i].y < byY[i - 1].y + MIN_SEP) {
+      byY[i].y = byY[i - 1].y + MIN_SEP;
+    }
+  }
+
+  // Jitter x for clusters of nearby nodes (zigzag left/right from center)
   let i = 0;
-  const place = (n: GraphNode, x: number): LayoutNode => {
-    const lane = i++ % lanes;
-    return { ...n, x, y: 60 + lane * laneH + ((i % 2) * 14) };
-  };
-  const out: LayoutNode[] = [];
-  // Undated (incl. center if it has no year) sit in a left margin column.
-  undatedNodes.forEach(n => out.push(place(n, 30)));
-  dated
-    .sort((a, b) => (a.birthYear as number) - (b.birthYear as number))
-    .forEach(n => out.push(place(n, padX + (((n.birthYear as number) - minY) / span) * usableW)));
-  return out;
+  while (i < byY.length) {
+    let j = i + 1;
+    while (j < byY.length && byY[j].y - byY[j - 1].y <= MIN_SEP * 1.1) j++;
+    if (j - i > 1) {
+      for (let k = i; k < j; k++) {
+        byY[k].x = cx + ((k - i) % 2 === 0 ? -JITTER : JITTER);
+      }
+    }
+    i = j;
+  }
+
+  // byY entries are same objects as placed, so mutations propagate
+  undated.forEach((n, k) => {
+    const maxY = placed.reduce((m, p) => Math.max(m, p.y), 0);
+    placed.push({ ...n, x: cx, y: maxY + 30 + k * 50 });
+  });
+
+  return placed;
+}
+
+function formatYear(y: number): string {
+  return y < 0 ? `${Math.abs(y)} BCE` : `${y} CE`;
 }
 
 const KIND_COLOR: Record<string, { fill: string; stroke: string }> = {
   entry:   { fill: '#5b8ef5', stroke: '#5b8ef5' },
   idea:    { fill: '#1f3a36', stroke: '#3fa796' },
   thinker: { fill: '#3a2e1a', stroke: '#c79a3f' },
-  linked:  { fill: '#26324a', stroke: '#5b8ef5' }, // neighbouring entry (Links view)
+  linked:  { fill: '#26324a', stroke: '#5b8ef5' },
 };
+
+// label visibility driven by zoom level — none < 0.7 < partial < 1.4 < all < 2.5 < full
+type LabelMode = 'none' | 'partial' | 'all' | 'full';
+
+function labelModeForScale(s: number): LabelMode {
+  'worklet';
+  if (s < 0.7) return 'none';
+  if (s < 1.4) return 'partial';
+  if (s < 2.5) return 'all';
+  return 'full';
+}
 
 function IconArrowUp({ color = '#9a9a9a' }: { color?: string }) {
   return (
@@ -139,6 +187,9 @@ function IconArrowUp({ color = '#9a9a9a' }: { color?: string }) {
     </Svg>
   );
 }
+
+const MIN_SCALE = 0.2;
+const MAX_SCALE = 6;
 
 export default function GraphScreen() {
   const insets = useSafeAreaInsets();
@@ -154,35 +205,101 @@ export default function GraphScreen() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<{ slug: string; title: string } | null>(null);
   const [preview, setPreview] = useState<{ author: string | null; excerpt: string | null } | null>(null);
+  const [labelMode, setLabelMode] = useState<LabelMode>('partial');
 
-  const canvasH = height - insets.top - 44 - 40 - insets.bottom; // header + mode bar
+  const canvasH = height - insets.top - 44 - 40 - insets.bottom;
 
-  const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-  const panOffset = useRef({ x: 0, y: 0 });
+  // ── Reanimated pan + zoom state ──────────────────────────────────────────
+  const scale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedScale = useSharedValue(1);
+  const savedTx = useSharedValue(0);
+  const savedTy = useSharedValue(0);
+  const focalX0 = useSharedValue(0);
+  const focalY0 = useSharedValue(0);
 
+  // Keep sharedValues for canvas dimensions accessible in worklets
+  const widthSV = useSharedValue(width);
+  const canvasHSV = useSharedValue(canvasH);
+  useEffect(() => { widthSV.value = width; canvasHSV.value = canvasH; }, [width, canvasH]);
+
+  // Drive label visibility from zoom level
+  useAnimatedReaction(
+    () => scale.value,
+    (cur, prev) => {
+      if (cur === prev) return;
+      const next = labelModeForScale(cur);
+      runOnJS(setLabelMode)(next);
+    },
+  );
+
+  // Reset pan/zoom whenever the graph data changes
   useEffect(() => {
-    pan.addListener(v => { panOffset.current = v; });
-    return () => pan.removeAllListeners();
-  }, []);
+    scale.value = 1;
+    translateX.value = 0;
+    translateY.value = 0;
+  }, [nodes]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 2 || Math.abs(g.dy) > 2,
-      onPanResponderGrant: () => pan.setOffset(panOffset.current),
-      onPanResponderMove: Animated.event(
-        [null, { dx: pan.x, dy: pan.y }],
-        { useNativeDriver: false }
-      ),
-      onPanResponderRelease: () => pan.flattenOffset(),
+  // ── Gestures ─────────────────────────────────────────────────────────────
+  const panGesture = Gesture.Pan()
+    .maxPointers(1)
+    .onStart(() => {
+      'worklet';
+      savedTx.value = translateX.value;
+      savedTy.value = translateY.value;
     })
-  ).current;
+    .onChange(e => {
+      'worklet';
+      translateX.value = savedTx.value + e.translationX;
+      translateY.value = savedTy.value + e.translationY;
+    });
 
+  const pinchGesture = Gesture.Pinch()
+    .onStart(e => {
+      'worklet';
+      savedScale.value = scale.value;
+      savedTx.value = translateX.value;
+      savedTy.value = translateY.value;
+      focalX0.value = e.focalX;
+      focalY0.value = e.focalY;
+    })
+    .onChange(e => {
+      'worklet';
+      // Clamp scale
+      const s = Math.min(MAX_SCALE, Math.max(MIN_SCALE, savedScale.value * e.scale));
+      scale.value = s;
+      const ratio = s / savedScale.value;
+      // Keep the initial focal world-point fixed under the current focal screen position.
+      // With transformOrigin '0% 0%': screen = world * scale + translate
+      translateX.value = e.focalX - (focalX0.value - savedTx.value) * ratio;
+      translateY.value = e.focalY - (focalY0.value - savedTy.value) * ratio;
+    });
+
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      'worklet';
+      scale.value = withSpring(1, { damping: 20, stiffness: 200 });
+      translateX.value = withSpring(0, { damping: 20, stiffness: 200 });
+      translateY.value = withSpring(0, { damping: 20, stiffness: 200 });
+    });
+
+  const gesture = Gesture.Simultaneous(doubleTap, panGesture, pinchGesture);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ] as any,
+  }));
+
+  // ── Data loading ──────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    // 'links' is the SEP hyperlink neighbourhood (our own link index); the other
-    // modes are the InPhO semantic graph.
     const load = mode === 'links'
       ? getArticleLinkGraph(centerSlug ?? '')
       : getGraph(centerSlug ?? '', mode);
@@ -203,16 +320,69 @@ export default function GraphScreen() {
     [nodes]
   );
 
+  // Detect substantial gaps in the timeline and produce break markers.
+  const timelineBreaks = useMemo(() => {
+    if (mode !== 'timeline') return [];
+    const dated = nodes
+      .filter(n => typeof n.birthYear === 'number')
+      .sort((a, b) => (a.birthYear as number) - (b.birthYear as number));
+    if (dated.length < 2) return [];
+
+    const pairs = dated.slice(1).map((n, i) => ({
+      older: dated[i],   // lower on screen (higher y)
+      newer: n,          // higher on screen (lower y)
+      gapYears: (n.birthYear as number) - (dated[i].birthYear as number),
+    })).filter(p => p.gapYears > 0);
+
+    if (!pairs.length) return [];
+
+    const sorted = [...pairs].sort((a, b) => a.gapYears - b.gapYears);
+    const median = sorted[Math.floor(sorted.length / 2)].gapYears;
+    const threshold = Math.max(50, median * 2.5);
+
+    return pairs
+      .filter(p => p.gapYears >= threshold)
+      .map(p => ({
+        fromYear: p.older.birthYear as number,
+        toYear: p.newer.birthYear as number,
+        yOlder: p.older.y,  // higher value (bottom of screen)
+        yNewer: p.newer.y,  // lower value (top of screen)
+      }));
+  }, [nodes, mode]);
+
   const open = (slug: string, title: string) =>
     nav.push('Article', { slug, title });
 
-  // Tap a node → show a preview card first (excerpt loads lazily).
   const selectNode = (slug: string, title: string) => {
     setSelected({ slug, title });
     setPreview(null);
     getEntryPreview(slug).then(p => {
       if (p) setPreview({ author: p.author, excerpt: p.excerpt });
     });
+  };
+
+  // ── Label rendering helpers ───────────────────────────────────────────────
+  const getLabel = (node: LayoutNode) => {
+    const yr = typeof node.birthYear === 'number'
+      ? ` (${node.birthYear < 0 ? Math.abs(node.birthYear) + ' BCE' : node.birthYear})` : '';
+    const title = labelMode === 'full'
+      ? node.title
+      : node.title.length > 22 ? node.title.slice(0, 20) + '…' : node.title;
+    return title + (mode === 'timeline' ? yr : '');
+  };
+
+  const showLabel = (node: LayoutNode): boolean => {
+    const isCenter = node.slug === centerSlug;
+    if (labelMode === 'none') return false;
+    if (labelMode === 'partial') return isCenter || !!node.read || mode === 'timeline';
+    return true; // 'all' | 'full'
+  };
+
+  const labelColor = (node: LayoutNode): string => {
+    if (node.slug === centerSlug) return '#5b8ef5';
+    if (node.kind === 'thinker') return '#c79a3f';
+    if (node.kind === 'linked') return '#7da0d8';
+    return '#3fa796';
   };
 
   return (
@@ -226,7 +396,7 @@ export default function GraphScreen() {
           <IconArrowUp color="#9a9a9a" />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerEyebrow}>GRAPH</Text>
+          <Text style={styles.headerEyebrow}>GRAPH2</Text>
           {centerTitle ? (
             <Text style={styles.headerTitle} numberOfLines={1}>{centerTitle}</Text>
           ) : null}
@@ -234,7 +404,7 @@ export default function GraphScreen() {
         <View style={styles.back} />
       </View>
 
-      {/* ── View switcher (Links / Related / Timeline / Influence) ── */}
+      {/* ── View switcher ── */}
       <View style={styles.modeBar}>
         {(['links', 'related', 'timeline', 'influence'] as GraphView[]).map(m => (
           <TouchableOpacity
@@ -263,81 +433,129 @@ export default function GraphScreen() {
             </Text>
             <Text style={styles.emptyHint}>
               {mode === 'links'
-                ? 'This article has no cross-references to other entries yet,\nor it hasn’t been cached — open it once to index its links.'
+                ? "This article has no cross-references to other entries yet,\nor it hasn't been cached — open it once to index its links."
                 : mode === 'influence'
                 ? 'InPhO has no teacher/student/influence edges for this entry.'
                 : mode === 'timeline'
                 ? 'No related thinkers with recorded dates were found.'
-                : 'InPhO has no related ideas or thinkers for this entry,\nor the index is still syncing — check your connection.'}
+                : "InPhO has no related ideas or thinkers for this entry,\nor the index is still syncing — check your connection."}
             </Text>
           </View>
         ) : (
-          <Animated.View
-            style={[styles.canvasInner, { transform: pan.getTranslateTransform() }]}
-            {...panResponder.panHandlers}
-          >
-            <Svg width={width} height={canvasH}>
-              {edges.map((e, i) => {
-                const a = nodeMap.get(e.from_slug);
-                const b = nodeMap.get(e.to_slug);
-                if (!a || !b) return null;
-                return (
-                  <Line
-                    key={i}
-                    x1={a.x} y1={a.y}
-                    x2={b.x} y2={b.y}
-                    stroke="#252525"
-                    strokeWidth={1}
-                  />
-                );
-              })}
-              {nodes.map(node => {
-                const isCenter = node.slug === centerSlug;
-                const kc = KIND_COLOR[node.kind ?? 'idea'] ?? KIND_COLOR.idea;
-                const r = isCenter ? 11 : node.kind === 'thinker' ? 7 : 6;
-                const fill = isCenter ? kc.fill : kc.fill;
-                const stroke = kc.stroke;
-                // In Timeline mode every node is labelled; otherwise only center + read.
-                const showLabel = mode === 'timeline' || node.read || isCenter;
-                const yr = typeof node.birthYear === 'number'
-                  ? ` (${node.birthYear < 0 ? Math.abs(node.birthYear) + ' BCE' : node.birthYear})` : '';
-                const base = node.title.length > 22 ? node.title.slice(0, 20) + '…' : node.title;
-                const label = base + (mode === 'timeline' ? yr : '');
-                return (
-                  <G
-                    key={node.slug}
-                    onPress={() => selectNode(node.slug, node.title)}
-                  >
-                    <Circle
-                      cx={node.x} cy={node.y}
-                      r={r + 8}
-                      fill="transparent"
-                    />
-                    <Circle
-                      cx={node.x} cy={node.y}
-                      r={r}
-                      fill={fill}
-                      stroke={stroke}
-                      strokeWidth={1.5}
-                    />
-                    {showLabel && (
+          <GestureDetector gesture={gesture}>
+            <Reanimated.View style={[styles.canvasInner, animatedStyle]}>
+              <Svg width={width} height={canvasH}>
+                {/* ── Timeline break markers (rendered first, behind everything) ── */}
+                {timelineBreaks.map((brk, i) => {
+                  const NODE_R = 8;
+                  const brkTop = brk.yNewer + NODE_R + 12;
+                  const brkBot = brk.yOlder - NODE_R - 12;
+                  const brkH = brkBot - brkTop;
+                  if (brkH < 28) return null;
+                  const midY = brkTop + brkH / 2;
+                  const label = `${formatYear(brk.fromYear)}  —  ${formatYear(brk.toYear)}`;
+                  return (
+                    <G key={`brk-${i}`}>
+                      <Rect
+                        x={0} y={brkTop}
+                        width={width} height={brkH}
+                        fill="rgba(22,22,30,0.85)"
+                      />
+                      <Line
+                        x1={0} y1={brkTop} x2={width} y2={brkTop}
+                        stroke="#2a2a38" strokeWidth={1}
+                        strokeDasharray="5,5"
+                      />
+                      <Line
+                        x1={0} y1={brkBot} x2={width} y2={brkBot}
+                        stroke="#2a2a38" strokeWidth={1}
+                        strokeDasharray="5,5"
+                      />
                       <SvgText
-                        x={node.x}
-                        y={node.y + r + 12}
+                        x={width / 2} y={midY - 7}
                         textAnchor="middle"
-                        fontSize={9}
-                        fill={isCenter ? '#5b8ef5' : node.kind === 'thinker' ? '#c79a3f' : node.kind === 'linked' ? '#7da0d8' : '#3fa796'}
+                        fontSize={8} fill="#333344"
+                        fontWeight="700"
+                        letterSpacing={1.5}
+                      >
+                        BREAK
+                      </SvgText>
+                      <SvgText
+                        x={width / 2} y={midY + 9}
+                        textAnchor="middle"
+                        fontSize={10} fill="#38384e"
+                        fontWeight="500"
                       >
                         {label}
                       </SvgText>
-                    )}
-                  </G>
-                );
-              })}
-            </Svg>
-          </Animated.View>
+                    </G>
+                  );
+                })}
+
+                {/* ── Edges ── */}
+                {edges.map((e, i) => {
+                  const a = nodeMap.get(e.from_slug);
+                  const b = nodeMap.get(e.to_slug);
+                  if (!a || !b) return null;
+                  return (
+                    <Line
+                      key={i}
+                      x1={a.x} y1={a.y}
+                      x2={b.x} y2={b.y}
+                      stroke="#252525"
+                      strokeWidth={1}
+                    />
+                  );
+                })}
+
+                {/* ── Nodes ── */}
+                {nodes.map(node => {
+                  const isCenter = node.slug === centerSlug;
+                  const kc = KIND_COLOR[node.kind ?? 'idea'] ?? KIND_COLOR.idea;
+                  const r = isCenter ? 11 : node.kind === 'thinker' ? 7 : 6;
+                  const isTimeline = mode === 'timeline';
+                  const laneLeft = isTimeline && node.x < width / 2;
+                  // Timeline: labels branch outward from their lane; other modes: below node.
+                  const lx = isTimeline ? (laneLeft ? node.x - r - 6 : node.x + r + 6) : node.x;
+                  const ly = isTimeline ? node.y + 3 : node.y + r + 12;
+                  const anchor = isTimeline ? (laneLeft ? 'end' : 'start') : 'middle';
+                  return (
+                    <G
+                      key={node.slug}
+                      onPress={() => selectNode(node.slug, node.title)}
+                    >
+                      <Circle
+                        cx={node.x} cy={node.y}
+                        r={r + 8}
+                        fill="transparent"
+                      />
+                      <Circle
+                        cx={node.x} cy={node.y}
+                        r={r}
+                        fill={kc.fill}
+                        stroke={kc.stroke}
+                        strokeWidth={1.5}
+                      />
+                      {showLabel(node) && (
+                        <SvgText
+                          x={lx}
+                          y={ly}
+                          textAnchor={anchor}
+                          fontSize={9}
+                          fill={labelColor(node)}
+                        >
+                          {getLabel(node)}
+                        </SvgText>
+                      )}
+                    </G>
+                  );
+                })}
+              </Svg>
+            </Reanimated.View>
+          </GestureDetector>
         )}
-        {/* ── Legend (bottom-left overlay) ── */}
+
+        {/* ── Legend ── */}
         <View style={[styles.legend, { bottom: insets.bottom + 12 }]}>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: '#5b8ef5' }]} />
@@ -360,6 +578,11 @@ export default function GraphScreen() {
               </View>
             </>
           )}
+        </View>
+
+        {/* ── Zoom hint ── */}
+        <View style={styles.zoomHint} pointerEvents="none">
+          <Text style={styles.zoomHintText}>Pinch to zoom · Double-tap to reset</Text>
         </View>
       </View>
 
@@ -391,7 +614,6 @@ export default function GraphScreen() {
           </View>
         </>
       )}
-
     </View>
   );
 }
@@ -462,7 +684,17 @@ const styles = StyleSheet.create({
   legendDot: { width: 10, height: 10, borderRadius: 5 },
   legendLabel: { color: '#555555', fontSize: 11 },
 
-  // Node preview card
+  zoomHint: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+  },
+  zoomHintText: {
+    color: '#2e2e2e',
+    fontSize: 10,
+    fontWeight: '500',
+  },
+
   previewBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
   previewCard: {
     position: 'absolute',
