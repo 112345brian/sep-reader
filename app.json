@@ -4,11 +4,11 @@
   "expo": {
     "name": "Nous",
     "slug": "nous",
-    "version": "0.4.0",
+    "version": "0.4.1",
     "orientation": "portrait",
     "android": {
       "package": "com.nous.sepreader",
-      "versionCode": 5
+      "versionCode": 6
     },
     "plugins": [
       "expo-sqlite",

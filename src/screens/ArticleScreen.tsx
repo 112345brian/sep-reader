@@ -217,13 +217,13 @@ export default function ArticleScreen() {
       const rest = recent.map(r => r.slug).filter(s => s !== slug);
       primeBackfillForSlugs([slug, ...rest]);
     }).catch(() => {});
-    const [customCss, fontSizeStr, backlinks] = await Promise.all([
+    const [customCss, fontSizeStr] = await Promise.all([
       getMeta('custom_css'),
       getMeta('font_size'),
-      getLinksTo(slug),
     ]);
     const fontSize = fontSizeStr ? parseInt(fontSizeStr, 10) : undefined;
 
+    // Show article immediately — don't wait for backlink count.
     setState({
       phase: 'ready',
       entry,
@@ -236,9 +236,23 @@ export default function ArticleScreen() {
         preambleHtml: entry.preamble_html ?? '',
         customCss: customCss ?? undefined,
         fontSize,
-        backlinkCount: backlinks.length,
+        backlinkCount: 0,
       }),
     });
+
+    // Inject backlink count after article is ready (non-blocking).
+    getLinksTo(slug).then(backlinks => {
+      if (backlinks.length > 0) {
+        webRef.current?.injectJavaScript(
+          `(function(){var r=document.querySelector('.backlinks-row');` +
+          `if(r){r.querySelector('.backlinks-badge').textContent=${JSON.stringify(String(backlinks.length))};r.style.display='';}` +
+          `else{var d=document.createElement('div');d.className='backlinks-row';` +
+          `d.onclick=function(){window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify({type:'backlinks'}));};` +
+          `d.innerHTML='<span class="backlinks-label">Related by link</span><span class="backlinks-badge">${backlinks.length}</span>';` +
+          `document.body.appendChild(d);}})();true;`
+        );
+      }
+    }).catch(() => {});
   }
 
   const handleLoadEnd = useCallback(() => {

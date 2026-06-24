@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1] — 2026-06-23
+
+### Fixed
+- **Article loading spinner on cached articles** — article now renders immediately after the DB read; backlink count loads in the background and injects via JS.
+- **10-second input lag** — `indexLinks` was issuing 100–200 sequential SQLite bridge calls per article open, flooding the JS event queue. Now a single batch INSERT.
+- **Missing index on `links.to_slug`** — `getLinksTo` was doing a full table scan; added `idx_links_to_slug`.
+
 ## [0.4.0] — 2026-06-23
 
 ### Added

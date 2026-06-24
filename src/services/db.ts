@@ -61,6 +61,8 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       PRIMARY KEY (from_slug, to_slug)
     );
 
+    CREATE INDEX IF NOT EXISTS idx_links_to_slug ON links(to_slug);
+
     CREATE TABLE IF NOT EXISTS article_versions (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       slug         TEXT NOT NULL,
@@ -603,14 +605,15 @@ export async function indexLinks(fromSlug: string, contentHtml: string): Promise
     if (m[1] !== fromSlug) targets.add(m[1]);
   }
   if (targets.size === 0) return;
+  const slugs = [...targets];
+  const placeholders = slugs.map(() => `(?, ?)`).join(', ');
+  const params = slugs.flatMap(to => [fromSlug, to]);
   await db.withTransactionAsync(async () => {
     await db.runAsync('DELETE FROM links WHERE from_slug = ?', [fromSlug]);
-    for (const to of targets) {
-      await db.runAsync(
-        'INSERT OR IGNORE INTO links (from_slug, to_slug) VALUES (?, ?)',
-        [fromSlug, to]
-      );
-    }
+    await db.runAsync(
+      `INSERT OR IGNORE INTO links (from_slug, to_slug) VALUES ${placeholders}`,
+      params
+    );
   });
 }
 
