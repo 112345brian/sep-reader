@@ -76,7 +76,10 @@ interface ArticleGroup {
 
 type BrowseSectionItem =
   | { kind: 'entry'; slug: string; title: string }
-  | { kind: 'parent'; label: string; slug: string | null; children: { slug: string; subTitle: string }[] };
+  | { kind: 'parent'; label: string; slug: string | null; children: { slug: string; subTitle: string }[] }
+  | { kind: 'more'; letter: string; remaining: number };
+
+const BROWSE_INITIAL = 15;
 
 interface BrowseSection {
   title: string; // the letter
@@ -192,10 +195,12 @@ export default function HomeScreen() {
   const [browseEntries, setBrowseEntries] = useState<{ slug: string; title: string; parent_label: string | null }[]>([]);
   const [browseLoaded, setBrowseLoaded]   = useState(false);
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+  const [expandedLetters, setExpandedLetters] = useState<Set<string>>(new Set());
 
-  const searchInputRef = useRef<TextInput>(null);
-  const debounce       = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sectionListRef = useRef<SectionList<BrowseSectionItem>>(null);
+  const searchInputRef  = useRef<TextInput>(null);
+  const debounce        = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sectionListRef  = useRef<SectionList<BrowseSectionItem>>(null);
+  const pendingScrollRef = useRef<string | null>(null);
 
   const loadData = useCallback(async () => {
     const [h, b, anns] = await Promise.all([
@@ -366,16 +371,42 @@ export default function HomeScreen() {
 
   const browseLetters = useMemo(() => browseSections.map(s => s.title), [browseSections]);
 
+  const visibleBrowseSections = useMemo<BrowseSection[]>(() =>
+    browseSections.map(s => {
+      if (expandedLetters.has(s.title) || s.data.length <= BROWSE_INITIAL) return s;
+      return {
+        ...s,
+        data: [
+          ...s.data.slice(0, BROWSE_INITIAL),
+          { kind: 'more' as const, letter: s.title, remaining: s.data.length - BROWSE_INITIAL },
+        ],
+      };
+    }),
+    [browseSections, expandedLetters]
+  );
+
+  const expandLetter = useCallback((letter: string) => {
+    setExpandedLetters(prev => { const n = new Set(prev); n.add(letter); return n; });
+  }, []);
+
   const handleAlphaSelect = useCallback((letter: string) => {
-    const idx = browseSections.findIndex(s => s.title === letter);
-    if (idx < 0 || !sectionListRef.current) return;
+    pendingScrollRef.current = letter;
+    setExpandedLetters(prev => { const n = new Set(prev); n.add(letter); return n; });
+  }, []);
+
+  useEffect(() => {
+    const letter = pendingScrollRef.current;
+    if (!letter || !sectionListRef.current) return;
+    const idx = visibleBrowseSections.findIndex(s => s.title === letter);
+    if (idx < 0) return;
+    pendingScrollRef.current = null;
     sectionListRef.current.scrollToLocation({
       sectionIndex: idx,
       itemIndex: 0,
       animated: false,
       viewPosition: 0,
     });
-  }, [browseSections]);
+  }, [visibleBrowseSections]);
 
   return (
     <GestureDetector gesture={swipeLeft}>
@@ -520,8 +551,8 @@ export default function HomeScreen() {
                 <>
                   <SectionList<BrowseSectionItem>
                     ref={sectionListRef}
-                    sections={browseSections}
-                    keyExtractor={item => item.kind === 'parent' ? `parent-${item.label}` : item.slug}
+                    sections={visibleBrowseSections}
+                    keyExtractor={item => item.kind === 'parent' ? `parent-${item.label}` : item.kind === 'more' ? `more-${item.letter}` : item.slug}
                     contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingLeft: 32 }}
                     stickySectionHeadersEnabled
                     onScrollToIndexFailed={() => {}}
@@ -564,6 +595,17 @@ export default function HomeScreen() {
                               </TouchableOpacity>
                             ))}
                           </View>
+                        );
+                      }
+                      if (item.kind === 'more') {
+                        return (
+                          <TouchableOpacity
+                            style={styles.browseMoreRow}
+                            onPress={() => expandLetter(item.letter)}
+                            activeOpacity={0.6}
+                          >
+                            <Text style={styles.browseMoreText}>Show {item.remaining} more…</Text>
+                          </TouchableOpacity>
                         );
                       }
                       return (
@@ -858,6 +900,17 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: C.textHint,
+  },
+
+  browseMoreRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borderSubtle,
+  },
+  browseMoreText: {
+    fontSize: 13,
+    color: C.accent,
   },
 
   // Alphabet scrubber
