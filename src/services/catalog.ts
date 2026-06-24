@@ -203,14 +203,20 @@ export async function downloadAll(
   signal?: AbortSignal,
   scope: 'all' | 'sep' | 'owl' = 'all'
 ): Promise<void> {
-  const slugs = await getAllUncachedSlugs(scope);
-  const total = slugs.length;
-  let done = 0;
+  const [uncached, cached] = await Promise.all([
+    getAllUncachedSlugs(scope),
+    getCachedSlugs(scope),
+  ]);
+  // Report progress against the full library so a resumed download shows
+  // "900 / 1800" rather than "0 / 900", making it clear work wasn't lost.
+  const alreadyDone = cached.length;
+  const total = uncached.length + alreadyDone;
+  let done = alreadyDone;
 
   const CONCURRENCY = 4;
-  for (let i = 0; i < slugs.length; i += CONCURRENCY) {
+  for (let i = 0; i < uncached.length; i += CONCURRENCY) {
     if (signal?.aborted) return;
-    const chunk = slugs.slice(i, i + CONCURRENCY);
+    const chunk = uncached.slice(i, i + CONCURRENCY);
     await Promise.all(chunk.map(async ({ slug, title }) => {
       await fetchAndCacheArticle(slug);
       done++;
