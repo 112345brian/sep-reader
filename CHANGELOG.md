@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **Cross-article links opening Safari** — the WebView `baseUrl` was set to `https://plato.stanford.edu` (root), so relative links in cached article HTML (e.g. `../other-article/`) resolved to `/other-article/` instead of `/entries/other-article/`. They missed the intercept regex and fell through to `Linking.openURL`. Fixed by setting `baseUrl` to `https://plato.stanford.edu/entries/<slug>/`, matching the original page location.
+
 ## [0.4.1] — 2026-06-23
 
 ### Fixed
