@@ -14,6 +14,8 @@
 - **Native renderer enabled** — `USE_NATIVE_RENDERER = true`; article bodies now render via the custom native parser/renderer instead of WebView. `recordRead` is fire-and-forget (removes 2 SQLite round-trips from the navigation critical path); `getMeta` results are cached in memory (custom CSS and font size no longer re-queried on every article open); `buildArticleHtml` skipped in native mode.
 - **TOC jump wired for native** — `SepArticle` now exposes a `scrollToSection(id)` imperative handle via `forwardRef`; `handleTocJump` uses it instead of WebView JS injection.
 - **`resolveMath` wired** — native renderer uses the real on-device TeX→SVG resolver (`mathStore.resolveMath`) with SQLite-backed session cache; previous stub returned `null` for all math.
+- **Timeline view: oldest at bottom, newest at top** — corrected the y-axis direction so ancient philosophers (e.g. Pythagoras 580 BCE) appear at the bottom and later thinkers (e.g. Aquinas 1225 CE) at the top, matching the natural chronological reading of a vertical timeline.
+- **Timeline horizontal jitter** — nodes whose birth years place them within 28dp of a neighbor now alternate left/right (±12% of canvas width) instead of stacking vertically, keeping the timeline's vertical axis legible while avoiding dot overlap.
 
 ### Fixed
 - **In-app navigation for native links** — the native renderer's `onLinkPress` now mirrors the WebView's `handleNav`: in-page anchors (`#section`, bibliography refs) scroll within the article via `scrollToSection`, cross-article links (absolute `/entries/…` **and** relative `../slug/`) push a new Article screen, and only genuinely external links open the system browser. Previously in-page anchors and relative cross-article links were silently dropped in native mode.
