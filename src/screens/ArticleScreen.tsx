@@ -355,9 +355,11 @@ export default function ArticleScreen() {
     .onEnd(e => {
       'worklet';
       if (e.translationX > 80 && e.velocityX > 150) {
-        screenX.value = withSpring(500, { damping: 22, stiffness: 260 }, () => {
-          runOnJS(navBack)();
-        });
+        // Reset immediately and let React Navigation drive the back transition.
+        // Springing to 500 first leaves a blank #111 frame because the native
+        // stack detaches the previous screen — nothing is rendered behind us.
+        screenX.value = withSpring(0, { damping: 30, stiffness: 400 });
+        runOnJS(navBack)();
       } else {
         screenX.value = withSpring(0, { damping: 22, stiffness: 260 });
       }
