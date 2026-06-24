@@ -58,9 +58,10 @@ export type DownloadProgress = {
 
 export async function downloadAll(
   onProgress: (p: DownloadProgress) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  scope: 'all' | 'sep' | 'owl' = 'all'
 ): Promise<void> {
-  const slugs = await getAllUncachedSlugs();
+  const slugs = await getAllUncachedSlugs(scope);
   const total = slugs.length;
   let done = 0;
 

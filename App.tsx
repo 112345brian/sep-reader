@@ -126,7 +126,7 @@ export default function App() {
 
     // Kick off bulk download in background if user requested it
     if (prefs.downloadAll) {
-      downloadAll(p => setDownloadProgress(p))
+      downloadAll(p => setDownloadProgress(p), undefined, prefs.libraryScope)
         .then(() => setDownloadProgress(null));
     }
   }

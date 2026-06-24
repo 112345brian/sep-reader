@@ -6,6 +6,15 @@
 - **Sub-entry parent breadcrumb** — entries that belong to a parent group (e.g. "Nietzsche's Aesthetics" under "aesthetics") now show the parent label as a small blue tag above the article title and in list rows (search results, history, bookmarks, links). The tag uses the same pill style as the article breadcrumb. Standalone entries (e.g. "Anarchism") are unaffected.
 - `parent_label` column in the `entries` table — stored explicitly at index-sync time so the parent relationship is a first-class field, not inferred from colon-splitting titles. Browse grouping and article display both use it; a colon-parse fallback handles entries cached before the migration.
 - `cleanDenormalizedTitles()` — runs after every index sync to strip the legacy `"Parent: "` prefix from any `reads` and `bookmarks` rows whose titles were written in the old format.
+- **Library scope selector** — onboarding and Settings › Library now offer an "All / Stanford Encyclopedia / The OWL" chip toggle so users can target which encyclopedias to include. Persisted as `pref_library_scope` in SQLite meta. Scope is respected by both the initial bulk download and the "Download all articles" button in Settings.
+- **`source` column on `entries`** — DB migration adds `source TEXT NOT NULL DEFAULT 'sep'`; `getAllUncachedSlugs` and `getCachedSlugs` accept an optional scope filter so download queries can be narrowed by source without full-table scans.
+
+### Changed
+- **Onboarding default flipped** — "Download everything now" is now the pre-selected option (was "As I read") and carries the "Recommended" badge. Download description updates dynamically to reflect the selected scope (e.g. "~1,800 Stanford Encyclopedia articles (~400 MB)" vs. "SEP + OWL ontology").
+- Welcome screen copy updated from "Stanford Encyclopedia of Philosophy" to "Philosophy Reference" ahead of multi-source support.
+
+### Fixed
+- `expo-file-system` `documentDirectory` import — the property was removed from the top-level export in the current SDK version; import now comes from `expo-file-system/legacy`. Resolved the lone TypeScript error in `inpho.ts`.
 
 ### Added — native renderer foundation (not yet wired into the UI)
 - **Custom SEP HTML parser** (`src/utils/sepHtml/`) — tokenizes stored article HTML into a typed AST (`parse.ts` + `types.ts`) via `htmlparser2`, ahead of replacing the WebView with native React Native rendering. Handles SEP's full tag set: headings (with section ids), paragraphs, lists, definition lists, blockquotes, captioned tables, `.wl` cross-reference links, footnote refs, and inline/deprecated formatting. Nested tables flagged `unsupported` for a scoped WebView fallback. 9 unit tests.
