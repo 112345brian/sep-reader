@@ -373,14 +373,14 @@ export default function SettingsScreen() {
           <TouchableOpacity style={styles.row} onPress={() => Linking.openURL('https://plato.stanford.edu')} activeOpacity={0.7}>
             <View style={styles.supportTextWrap}>
               <Text style={styles.rowLabel}>Stanford Encyclopedia of Philosophy</Text>
-              <Text style={styles.supportSub}>Content source</Text>
+              <Text style={styles.supportSub}>Suggested content source</Text>
             </View>
             <Text style={styles.rowValue}>↗</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => Linking.openURL('https://www.inphoproject.org')} activeOpacity={0.7}>
             <View style={styles.supportTextWrap}>
               <Text style={styles.rowLabel}>InPhO, Indiana University</Text>
-              <Text style={styles.supportSub}>Semantic graph source</Text>
+              <Text style={styles.supportSub}>Suggested semantic graph</Text>
             </View>
             <Text style={styles.rowValue}>↗</Text>
           </TouchableOpacity>
@@ -391,7 +391,7 @@ export default function SettingsScreen() {
           <TouchableOpacity style={styles.row} onPress={() => Linking.openURL('https://plato.stanford.edu/support/')} activeOpacity={0.7}>
             <View style={styles.supportTextWrap}>
               <Text style={styles.rowLabel}>Donate to the SEP</Text>
-              <Text style={styles.supportSub}>Keep the encyclopedia free for everyone</Text>
+              <Text style={styles.supportSub}>Support them!</Text>
             </View>
             <Text style={styles.rowValue}>↗</Text>
           </TouchableOpacity>
