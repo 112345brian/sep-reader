@@ -23,7 +23,8 @@ import { fetchAndCacheArticle } from '../services/catalog';
 import { primeBackfillForSlugs } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
-import { SepArticle } from '../utils/sepHtml/render/SepArticle';
+import { SepArticle, type SepArticleHandle } from '../utils/sepHtml/render/SepArticle';
+import { resolveMath, hydrateMath, collectMathNodes } from '../utils/sepHtml/render/mathStore';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet from '../components/TocSheet';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
@@ -48,11 +49,7 @@ interface PendingAnnotation {
 
 const SEP_BASE = 'https://plato.stanford.edu';
 
-// Flag-gated native renderer (off by default — WebView remains the default
-// reading surface). When on, the article body renders via the custom native
-// parser/renderer instead of the WebView. Math resolves to null here (TeX-text
-// fallback) until the build-time math store is wired through the content DB.
-const USE_NATIVE_RENDERER = false;
+const USE_NATIVE_RENDERER = true;
 
 // ── Icon helpers ───────────────────────────────────────────────────────────
 
@@ -161,6 +158,13 @@ export default function ArticleScreen() {
     [state.phase, readyContentHtml],
   );
 
+  // Warm the math SVG cache from SQLite after parse so repeat visits skip re-render.
+  // Gated on has_math so the ~76% of math-free articles skip the AST walk entirely.
+  useEffect(() => {
+    if (!nativeArticle || state.phase !== 'ready' || !state.entry.has_math) return;
+    hydrateMath(collectMathNodes(nativeArticle.blocks)).catch(() => {});
+  }, [nativeArticle]);
+
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
   const modalAnnotation =
@@ -169,6 +173,7 @@ export default function ArticleScreen() {
       : editingAnnotation ?? null;
 
   const webRef = useRef<any>(null);
+  const nativeArticleRef = useRef<SepArticleHandle>(null);
   // Always-current snapshot of annotations for use in callbacks that can't
   // take a dep on annotations without causing stale-closure bugs (handleLoadEnd).
   const annotationsRef = useRef<Annotation[]>([]);
@@ -208,7 +213,7 @@ export default function ArticleScreen() {
     setOrphaned(stale);
     setOrphanDismissed(false);
 
-    await recordRead(slug, entry.title, fromSlug);
+    recordRead(slug, entry.title, fromSlug).catch(() => {});
     // Both fire-and-forget — don't block article render.
     indexLinks(slug, entry.content_html ?? '').catch(() => {});
     // Prime InPhO date backfill: active article first, then reading history,
@@ -227,7 +232,7 @@ export default function ArticleScreen() {
     setState({
       phase: 'ready',
       entry,
-      html: buildArticleHtml({
+      html: USE_NATIVE_RENDERER ? '' : buildArticleHtml({
         slug: entry.slug,
         title: entry.title,
         parentLabel: entry.parent_label,
@@ -362,9 +367,13 @@ export default function ArticleScreen() {
   };
 
   const handleTocJump = (href: string) => {
-    webRef.current?.injectJavaScript(
-      `(function(){var el=document.getElementById(${JSON.stringify(href)});if(el)el.scrollIntoView({behavior:'smooth'});})();true;`
-    );
+    if (USE_NATIVE_RENDERER) {
+      nativeArticleRef.current?.scrollToSection(href);
+    } else {
+      webRef.current?.injectJavaScript(
+        `(function(){var el=document.getElementById(${JSON.stringify(href)});if(el)el.scrollIntoView({behavior:'smooth'});})();true;`
+      );
+    }
   };
 
   const displayTitle = state.phase === 'ready' ? state.entry.title : title;
@@ -507,14 +516,37 @@ export default function ArticleScreen() {
             )}
             {USE_NATIVE_RENDERER && nativeArticle ? (
               <SepArticle
+                ref={nativeArticleRef}
                 article={nativeArticle}
-                resolveMath={() => null}
-                onLinkPress={(href) => {
-                  const m = href.match(/\/entries\/([a-z0-9-]+)\/?/);
-                  if (m && m[1] !== slug) nav.push('Article', { slug: m[1], title: m[1], fromSlug: slug });
+                resolveMath={resolveMath}
+                onLinkPress={(href, _wl) => {
+                  const sepEntry = href.match(/(?:plato\.stanford\.edu)?\/entries\/([a-z0-9-]+)\//);
+                  if (sepEntry) {
+                    const target = sepEntry[1];
+                    if (target !== slug) nav.push('Article', { slug: target, title: target, fromSlug: slug });
+                  } else if (href.startsWith('http')) {
+                    Linking.openURL(href).catch(() => {});
+                  }
                 }}
-                onFootnotePress={() => { /* footnote text wiring lands with the AST footnote map */ }}
+                onFootnotePress={(fnHref, _label) => {
+                  if (state.phase !== 'ready') return;
+                  const id = fnHref.startsWith('#') ? fnHref.slice(1) : fnHref;
+                  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                  const m = new RegExp(`<li[^>]+id="${escaped}"[^>]*>([\\s\\S]*?)</li>`, 'i').exec(state.entry.content_html ?? '');
+                  const text = m ? m[1].replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#?\w+;/g, ' ').replace(/\s+/g, ' ').trim() : '';
+                  if (text) setFootnote({ text });
+                }}
                 onProgress={(v) => setReadProgress(slug, v).catch(() => {})}
+                resolveImageSrc={(src) => {
+                  if (src.startsWith('http')) return src;
+                  if (src.startsWith('/')) return `${SEP_BASE}${src}`;
+                  return `${SEP_BASE}/entries/${slug}/${src}`;
+                }}
+                annotations={annotations}
+                onAnnotationPress={(ann) => setEditingAnnotation(ann)}
+                onAnnotationCreate={(text) => {
+                  setPendingAnnotation({ selected_text: text, context: null, color: '#fbbf24' });
+                }}
               />
             ) : (
             <WebView

@@ -78,6 +78,31 @@ export async function hydrateMath(nodes: Array<{ tex: string; display: boolean }
   }
 }
 
+// Collect all math nodes from a parsed article's block tree so callers can
+// pass the result to hydrateMath() before render.
+export function collectMathNodes(
+  blocks: import('../types').Block[],
+): Array<{ tex: string; display: boolean }> {
+  const out: Array<{ tex: string; display: boolean }> = [];
+  function fromInlines(inlines: import('../types').Inline[]) {
+    for (const n of inlines) {
+      if (n.t === 'math') { out.push({ tex: n.tex, display: n.display }); continue; }
+      if ('children' in n && Array.isArray(n.children)) fromInlines(n.children as import('../types').Inline[]);
+    }
+  }
+  function fromBlocks(bs: import('../types').Block[]) {
+    for (const b of bs) {
+      if (b.t === 'para' || b.t === 'heading') { fromInlines(b.children); continue; }
+      if (b.t === 'list') { b.items.forEach(item => fromBlocks(item)); continue; }
+      if (b.t === 'blockquote') { fromBlocks(b.children); continue; }
+      if (b.t === 'deflist') { b.rows.forEach(r => { fromInlines(r.term); fromBlocks(r.def); }); continue; }
+      if (b.t === 'table') { b.rows.forEach(r => r.cells.forEach(c => fromInlines(c))); continue; }
+    }
+  }
+  fromBlocks(blocks);
+  return out;
+}
+
 // Test/diagnostic hook.
 export function _clearMathCache(): void {
   mem.clear();
