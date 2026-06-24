@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 /*
- * Build-time TeX → SVG renderer (MathJax in Node).
+ * TeX → SVG renderer (MathJax in Node). DEV / AUDIT TOOL ONLY.
  *
- * SEP uses MathJax to render ~122k inline/display TeX equations across 449
- * articles. Rather than ship a math engine in the app, we pre-render every
- * equation to a self-contained SVG string at build time and store it in the
- * content DB. The app then draws static SVG via react-native-svg (already a
- * dependency) — zero runtime math cost.
+ * In production this rendering happens ON-DEVICE — see
+ * src/utils/sepHtml/render/texToSvg.ts, which is the same DOM-free liteAdaptor
+ * path running in the RN runtime. The client renders each equation from fetched
+ * TeX and caches the SVG locally; the SVG is a runtime artifact and is NEVER
+ * bundled or folded into a shipped DB (SEP-derived output may not be
+ * redistributed — see NOTICE.md / AGENTS.md).
+ *
+ * This script (and buildMathSvg.cjs) exist only for corpus analysis / sizing and
+ * write to .audit/ (gitignored, never shipped). Do not feed their output into
+ * the app bundle or content DB.
  *
  * Exports texToSvg(tex, display) -> { svg, width, height } | { error }.
  * CLI: node scripts/renderMath.cjs '\\frac{a}{b}'   (add 'display' as 2nd arg)

@@ -4,7 +4,9 @@ import { makeExcerpt } from '../utils/excerpt';
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
-async function getDb(): Promise<SQLite.SQLiteDatabase> {
+// Exported so feature modules that own their own tables (e.g. services/graphDb.ts)
+// can share the single app DB connection rather than opening their own.
+export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (_db) return _db;
   _db = await SQLite.openDatabaseAsync('sep.db');
   await initSchema(_db);
@@ -77,6 +79,23 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       updated_at    INTEGER NOT NULL
     );
 
+    -- NOTE: the InPhO semantic-graph tables (inpho_nodes, inpho_relations) are
+    -- owned by services/graphDb.ts, which lazily creates them the first time the
+    -- graph feature is used. Keeping that schema out of the core reader DB keeps
+    -- the graph an optional, self-contained module.
+
+    -- Client-rendered math cache. Each row is a TeX equation rendered to SVG
+    -- ON THIS DEVICE (mathStore.ts / texToSvg.ts) from article TeX the user
+    -- fetched. This is a runtime artifact and is NEVER bundled or shipped — see
+    -- NOTICE.md. hash = mathStore.mathHash(tex, display); d = display flag.
+    CREATE TABLE IF NOT EXISTS math (
+      hash TEXT PRIMARY KEY,
+      svg  TEXT NOT NULL,
+      w    REAL,
+      h    REAL,
+      d    INTEGER NOT NULL DEFAULT 0
+    );
+
   `);
 
   // Column migrations — no-op if columns already exist
@@ -129,6 +148,43 @@ export async function getEntryCount(): Promise<number> {
     'SELECT COUNT(*) as count FROM entries'
   );
   return row?.count ?? 0;
+}
+
+// ── Client-rendered math cache (see src/utils/sepHtml/render/mathStore.ts) ──
+
+export interface MathRow {
+  hash: string;
+  svg: string;
+  w: number;
+  h: number;
+  d: boolean;
+}
+
+// Bulk-load cached equations by hash to warm the in-memory render cache.
+export async function getMathByHashes(hashes: string[]): Promise<MathRow[]> {
+  if (hashes.length === 0) return [];
+  const db = await getDb();
+  const placeholders = hashes.map(() => '?').join(',');
+  const rows = await db.getAllAsync<{ hash: string; svg: string; w: number; h: number; d: number }>(
+    `SELECT hash, svg, w, h, d FROM math WHERE hash IN (${placeholders})`,
+    hashes
+  );
+  return rows.map(r => ({ hash: r.hash, svg: r.svg, w: r.w, h: r.h, d: r.d === 1 }));
+}
+
+// Persist one device-rendered equation. Idempotent on hash.
+export async function putMath(
+  hash: string,
+  svg: string,
+  w: number,
+  h: number,
+  display: boolean
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'INSERT OR REPLACE INTO math (hash, svg, w, h, d) VALUES (?, ?, ?, ?, ?)',
+    [hash, svg, w, h, display ? 1 : 0]
+  );
 }
 
 export async function upsertIndexEntries(
@@ -648,80 +704,6 @@ export async function getAllAnnotations(): Promise<AnnotationWithTitle[]> {
     LEFT JOIN entries e ON e.slug = a.slug
     ORDER BY a.created_at DESC
   `);
-}
-
-// ── Graph view ────────────────────────────────────────────────────────────────
-
-export interface GraphNode { slug: string; title: string; read: boolean; }
-export interface GraphEdge { from_slug: string; to_slug: string; }
-export interface GraphData { nodes: GraphNode[]; edges: GraphEdge[]; }
-
-export async function getGraphData(): Promise<GraphData> {
-  const db = await getDb();
-  const edges = await db.getAllAsync<GraphEdge>(`
-    SELECT DISTINCT l.from_slug, l.to_slug
-    FROM links l
-    WHERE EXISTS (SELECT 1 FROM reads r WHERE r.slug = l.from_slug)
-    LIMIT 500
-  `);
-  if (edges.length === 0) return { nodes: [], edges: [] };
-
-  const allSlugs = new Set<string>();
-  for (const e of edges) { allSlugs.add(e.from_slug); allSlugs.add(e.to_slug); }
-
-  const readRows = await db.getAllAsync<{slug: string}>('SELECT DISTINCT slug FROM reads');
-  const readSet = new Set(readRows.map(r => r.slug));
-
-  const slugList = Array.from(allSlugs);
-  const titleRows = await db.getAllAsync<{slug: string; title: string}>(
-    `SELECT slug, title FROM entries WHERE slug IN (${slugList.map(() => '?').join(',')})`,
-    slugList
-  );
-  const titleMap = new Map(titleRows.map(r => [r.slug, r.title]));
-
-  return {
-    nodes: slugList.map(slug => ({ slug, title: titleMap.get(slug) ?? slug, read: readSet.has(slug) })),
-    edges,
-  };
-}
-
-// Local link graph for a single article: center node + outgoing links + backlinks
-export async function getArticleLinkGraph(centerSlug: string): Promise<GraphData> {
-  const db = await getDb();
-
-  const outgoing = await db.getAllAsync<GraphEdge>(
-    `SELECT from_slug, to_slug FROM links WHERE from_slug = ? LIMIT 150`,
-    [centerSlug]
-  );
-  const incoming = await db.getAllAsync<GraphEdge>(
-    `SELECT from_slug, to_slug FROM links WHERE to_slug = ? LIMIT 50`,
-    [centerSlug]
-  );
-
-  const edges = [...outgoing, ...incoming];
-  if (edges.length === 0) return { nodes: [], edges: [] };
-
-  const allSlugs = new Set<string>([centerSlug]);
-  for (const e of edges) { allSlugs.add(e.from_slug); allSlugs.add(e.to_slug); }
-
-  const readRows = await db.getAllAsync<{slug: string}>('SELECT DISTINCT slug FROM reads');
-  const readSet = new Set(readRows.map(r => r.slug));
-
-  const slugList = Array.from(allSlugs);
-  const titleRows = await db.getAllAsync<{slug: string; title: string}>(
-    `SELECT slug, title FROM entries WHERE slug IN (${slugList.map(() => '?').join(',')})`,
-    slugList
-  );
-  const titleMap = new Map(titleRows.map(r => [r.slug, r.title]));
-
-  return {
-    nodes: slugList.map(slug => ({
-      slug,
-      title: titleMap.get(slug) ?? slug,
-      read: readSet.has(slug),
-    })),
-    edges,
-  };
 }
 
 // ── JSON user data export / import ───────────────────────────────────────────

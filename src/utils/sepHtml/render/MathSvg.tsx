@@ -3,17 +3,18 @@ import { Text, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import { SEP_BASE_FONT, SEP_COLORS } from './theme';
 
-// A pre-rendered equation from the build-time math store (scripts/buildMathSvg).
+// An equation rendered to SVG on this device (mathStore.resolveMath), cached in
+// memory and in the local `math` table. Never a bundled/build-time asset.
 export interface ResolvedMath {
   svg: string; // self-contained <svg> with fill="currentColor"
   w: number; // width in ex units (MathJax)
   h: number; // height in ex units
 }
 
-// Resolve a math node's TeX to its pre-rendered SVG. Supplied by the screen,
-// backed by the content DB's `math` table (hash -> svg). Returns null when the
-// equation isn't in the store (e.g. live-fetched article, or a render error),
-// in which case we fall back to showing the raw TeX.
+// Resolve a math node's TeX to its SVG. Backed by mathStore: a cache hit returns
+// instantly; a miss renders on-device (synchronously) and caches. Returns null
+// only when the equation can't be rendered (e.g. the engine is unavailable in
+// this runtime, or an un-renderable equation), in which case we show raw TeX.
 export type MathResolver = (tex: string, display: boolean) => ResolvedMath | null;
 
 // MathJax sized our SVGs with ex:8 against em:16. The reader runs at 17px, so

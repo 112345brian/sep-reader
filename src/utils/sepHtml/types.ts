@@ -16,8 +16,9 @@ export type Inline =
   | { t: 'sub'; children: Inline[] }
   | { t: 'code'; v: string }
   // TeX math extracted from text (\(…\) inline, \[…\] display). 450 SEP
-  // articles use this; `tex` is the raw source, pre-rendered to SVG at build
-  // time. `display` marks block-style (centered, own line) vs inline.
+  // articles use this; `tex` is the raw source, rendered to SVG on-device at
+  // first encounter and cached (mathStore). `display` marks block-style
+  // (centered, own line) vs inline.
   | { t: 'math'; tex: string; display: boolean };
 
 export interface TableRow {
