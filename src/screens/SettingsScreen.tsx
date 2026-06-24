@@ -15,6 +15,7 @@ import type { Prefs } from '../services/db';
 import { downloadAll, syncCachedArticles } from '../services/catalog';
 import type { DownloadProgress } from '../services/catalog';
 import { exportToSyncFolder, importFromSyncFolder } from '../services/dataSync';
+import { importSeedFromUrl } from '../services/seedImport';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -22,7 +23,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
-  const [prefs, setPrefs] = useState<Prefs>({ homeMode: 'search', downloadAll: true, libraryScope: 'all' });
+  const [prefs, setPrefs] = useState<Prefs>({ homeMode: 'search', downloadAll: true, libraryScope: 'all', seedUrl: '' });
   const [cachedCount, setCachedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [lastSync, setLastSync] = useState<string | null>(null);
@@ -159,6 +160,25 @@ export default function SettingsScreen() {
     dlAbort?.abort();
     setDlAbort(null);
     setDlProgress(null);
+  }
+
+  async function handleSeedFromUrl() {
+    Alert.prompt(
+      'Seed from URL',
+      'Enter the URL of a Nous-compatible database file (.db)',
+      async (url) => {
+        if (!url?.trim()) return;
+        try {
+          await importSeedFromUrl(url.trim(), () => {});
+          Alert.alert('Done', 'Database imported. Restart the app to apply.');
+        } catch (e: any) {
+          Alert.alert('Import failed', e?.message ?? 'Unknown error');
+        }
+      },
+      'plain-text',
+      prefs.seedUrl,
+      'url',
+    );
   }
 
   async function handleSyncNow() {
@@ -322,11 +342,14 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             </>
           ) : (
-            <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={handleDownloadAll} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.row} onPress={handleDownloadAll} activeOpacity={0.7}>
               <Text style={styles.rowLabel}>Download all articles</Text>
               <Text style={styles.rowValue}>{(totalCount - cachedCount).toLocaleString()} remaining</Text>
             </TouchableOpacity>
           )}
+          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={handleSeedFromUrl} activeOpacity={0.7}>
+            <Text style={styles.rowLabel}>Import database from URL</Text>
+          </TouchableOpacity>
         </Section>
 
         {/* Auto-sync */}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Animated, useWindowDimensions,
+  Animated, useWindowDimensions, TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { savePrefs } from '../services/db';
@@ -26,6 +26,7 @@ export default function OnboardingScreen({ onDone }: Props) {
   const [homeMode, setHomeMode] = useState<Prefs['homeMode']>('search');
   const [downloadAll, setDownloadAll] = useState(true);
   const [libraryScope, setLibraryScope] = useState<Prefs['libraryScope']>('all');
+  const [seedUrl, setSeedUrl] = useState('');
 
   const stepIndex = STEPS.indexOf(step);
 
@@ -36,7 +37,7 @@ export default function OnboardingScreen({ onDone }: Props) {
   };
 
   const finish = async () => {
-    const prefs: Prefs = { homeMode, downloadAll, libraryScope };
+    const prefs: Prefs = { homeMode, downloadAll, libraryScope, seedUrl: seedUrl.trim() };
     await savePrefs(prefs);
     onDone(prefs);
   };
@@ -59,6 +60,8 @@ export default function OnboardingScreen({ onDone }: Props) {
             onChange={setDownloadAll}
             scope={libraryScope}
             onScopeChange={setLibraryScope}
+            seedUrl={seedUrl}
+            onSeedUrlChange={setSeedUrl}
           />
         )}
         {step === 'home' && (
@@ -88,17 +91,31 @@ function WelcomeStep() {
   );
 }
 
+type DownloadMode = 'all' | 'on_demand' | 'seed_url';
+
 function LibraryStep({
   value,
   onChange,
   scope,
   onScopeChange,
+  seedUrl,
+  onSeedUrlChange,
 }: {
   value: boolean;
   onChange: (v: boolean) => void;
   scope: Prefs['libraryScope'];
   onScopeChange: (v: Prefs['libraryScope']) => void;
+  seedUrl: string;
+  onSeedUrlChange: (v: string) => void;
 }) {
+  const mode: DownloadMode = seedUrl.trim() ? 'seed_url' : value ? 'all' : 'on_demand';
+
+  function setMode(m: DownloadMode) {
+    if (m === 'all') { onChange(true); onSeedUrlChange(''); }
+    else if (m === 'on_demand') { onChange(false); onSeedUrlChange(''); }
+    else { onChange(false); }
+  }
+
   return (
     <View style={styles.stepWrap}>
       <Text style={styles.stepTitle}>Build your library</Text>
@@ -113,18 +130,36 @@ function LibraryStep({
       </Text>
 
       <Option
-        selected={value}
-        onPress={() => onChange(true)}
+        selected={mode === 'all'}
+        onPress={() => setMode('all')}
         title="Download everything now"
         description={SCOPE_DOWNLOAD_DESC[scope]}
         badge="Recommended"
       />
       <Option
-        selected={!value}
-        onPress={() => onChange(false)}
+        selected={mode === 'on_demand'}
+        onPress={() => setMode('on_demand')}
         title="As I read"
         description="Articles download the first time you open them and stay cached for offline reading."
       />
+      <Option
+        selected={mode === 'seed_url'}
+        onPress={() => setMode('seed_url')}
+        title="Seed from URL"
+        description="Download a pre-built database in one request. Point to your own hosted copy."
+      />
+      {mode === 'seed_url' && (
+        <TextInput
+          style={styles.urlInput}
+          placeholder="https://example.com/nous.db"
+          placeholderTextColor="#444"
+          value={seedUrl}
+          onChangeText={onSeedUrlChange}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+        />
+      )}
     </View>
   );
 }
@@ -352,6 +387,18 @@ const styles = StyleSheet.create({
   },
   scopeChipTextActive: {
     color: '#7ba4ff',
+  },
+
+  urlInput: {
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    borderRadius: 10,
+    color: '#e8e8e8',
+    fontSize: 13,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 2,
   },
 
   // CTA

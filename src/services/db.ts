@@ -13,6 +13,14 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   return _db;
 }
 
+// Used by seedImport — closes the connection so the DB file can be replaced.
+export async function closeDb(): Promise<void> {
+  if (_db) {
+    await _db.closeAsync();
+    _db = null;
+  }
+}
+
 async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
@@ -497,18 +505,20 @@ export interface Prefs {
   homeMode: 'search' | 'continue';
   downloadAll: boolean;
   libraryScope: 'all' | 'sep' | 'owl';
+  seedUrl: string;
 }
 
 export async function getPrefs(): Promise<Prefs> {
   const db = await getDb();
   const rows = await db.getAllAsync<{ key: string; value: string }>(
-    "SELECT key, value FROM meta WHERE key IN ('pref_home', 'pref_download_all', 'pref_library_scope')"
+    "SELECT key, value FROM meta WHERE key IN ('pref_home', 'pref_download_all', 'pref_library_scope', 'pref_seed_url')"
   );
   const map = Object.fromEntries(rows.map(r => [r.key, r.value]));
   return {
     homeMode: (map['pref_home'] as Prefs['homeMode']) ?? 'search',
     downloadAll: map['pref_download_all'] !== 'false',
     libraryScope: (map['pref_library_scope'] as Prefs['libraryScope']) ?? 'all',
+    seedUrl: map['pref_seed_url'] ?? '',
   };
 }
 
@@ -518,11 +528,13 @@ export async function savePrefs(prefs: Prefs): Promise<void> {
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_home', ?)", [prefs.homeMode]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_download_all', ?)", [String(prefs.downloadAll)]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_library_scope', ?)", [prefs.libraryScope]);
+    await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_seed_url', ?)", [prefs.seedUrl]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('onboarding_done', 'true')");
   });
   cacheMeta('pref_home', prefs.homeMode);
   cacheMeta('pref_download_all', String(prefs.downloadAll));
   cacheMeta('pref_library_scope', prefs.libraryScope);
+  cacheMeta('pref_seed_url', prefs.seedUrl);
   cacheMeta('onboarding_done', 'true');
 }
 

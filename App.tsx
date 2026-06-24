@@ -9,6 +9,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services/db';
 import { syncOnLaunch } from './src/services/dataSync';
+import { importSeedFromUrl } from './src/services/seedImport';
+import type { SeedPhase } from './src/services/seedImport';
 import { refreshIndexIfStale, downloadAll, syncCachedArticles, backfillMathInline, backfillAst, backfillMathHashFormat } from './src/services/catalog';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
@@ -71,7 +73,7 @@ const THEME = {
   },
 };
 
-type AppPhase = 'booting' | 'onboarding' | 'indexing' | 'index_error' | 'ready';
+type AppPhase = 'booting' | 'onboarding' | 'seeding' | 'seed_error' | 'indexing' | 'index_error' | 'ready';
 
 export default function App() {
   if (IS_TEST_BUILD) {
@@ -84,6 +86,7 @@ export default function App() {
 
   const [phase, setPhase] = useState<AppPhase>('booting');
   const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
+  const [seedPhase, setSeedPhase] = useState<SeedPhase | null>(null);
   const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
   useEffect(() => {
@@ -160,6 +163,16 @@ export default function App() {
   }
 
   async function handleOnboardingDone(prefs: Prefs) {
+    if (prefs.seedUrl) {
+      setPhase('seeding');
+      try {
+        await importSeedFromUrl(prefs.seedUrl, p => setSeedPhase(p));
+      } catch {
+        setPhase('seed_error');
+        return;
+      }
+      setSeedPhase(null);
+    }
     setPhase('indexing');
     await initialize(prefs);
   }
@@ -167,7 +180,7 @@ export default function App() {
   // Always mounted so the math backfill can use it during boot.
   const mathWebView = <MathRenderWebView />;
 
-  if (phase === 'booting' || phase === 'indexing' || phase === 'index_error') {
+  if (phase === 'booting' || phase === 'seeding' || phase === 'seed_error' || phase === 'indexing' || phase === 'index_error') {
     return (
       <>
         {mathWebView}
@@ -175,6 +188,32 @@ export default function App() {
           <Text style={styles.bootLogo}>Nous</Text>
           {phase === 'index_error' ? (
             <Text style={styles.bootError}>Could not reach plato.stanford.edu.{'\n'}Check your connection and relaunch.</Text>
+          ) : phase === 'seed_error' ? (
+            <Text style={styles.bootError}>Could not download the seed database.{'\n'}Check the URL and relaunch.</Text>
+          ) : phase === 'seeding' && seedPhase ? (
+            seedPhase.phase === 'downloading' ? (
+              <>
+                <View style={styles.bootProgressTrack}>
+                  <View style={[styles.bootProgressFill, {
+                    width: seedPhase.bytesTotal > 0
+                      ? `${Math.round((seedPhase.bytesWritten / seedPhase.bytesTotal) * 100)}%` as any
+                      : '0%' as any,
+                  }]} />
+                </View>
+                <Text style={styles.bootLabel}>
+                  {seedPhase.bytesTotal > 0
+                    ? `${Math.round(seedPhase.bytesWritten / 1_048_576)} / ${Math.round(seedPhase.bytesTotal / 1_048_576)} MB`
+                    : `${Math.round(seedPhase.bytesWritten / 1_048_576)} MB…`}
+                </Text>
+              </>
+            ) : (
+              <>
+                <ActivityIndicator color="#7ba4ff" style={{ marginTop: 32 }} />
+                <Text style={styles.bootLabel}>
+                  {seedPhase.phase === 'validating' ? 'Validating…' : 'Installing…'}
+                </Text>
+              </>
+            )
           ) : downloadProgress ? (
             <>
               <View style={styles.bootProgressTrack}>
