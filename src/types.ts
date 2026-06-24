@@ -8,6 +8,7 @@ export interface EntryRow {
   toc_html: string | null;
   preamble_html: string | null;
   content_html: string | null;
+  has_math: number | null;
   word_count: number;
   cached_at: number | null;
 }

@@ -117,12 +117,14 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
     // aueditable starts with <h1> (title) which the template re-adds itself.
     const contentHtml = rawContentHtml.replace(/^\s*<!--[^>]*-->\s*/, '').replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '');
 
+    const linkedHtml = linkifyHtml(contentHtml);
     await cacheArticle(slug, {
       author: extractMetaContent(html, 'citation_author') ?? extractAuthor(html),
       pub_date: extractMetaContent(html, 'citation_publication_date'),
       toc_html: tocHtml,
       preamble_html: preambleHtml,
-      content_html: linkifyHtml(contentHtml),
+      content_html: linkedHtml,
+      has_math: linkedHtml.includes('\\(') || linkedHtml.includes('\\[') ? 1 : 0,
     });
     // Index outgoing links for graph view
     indexLinks(slug, contentHtml).catch(() => {});

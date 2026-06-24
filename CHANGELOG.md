@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **`has_math` flag on cached articles** — detected at cache time (string scan for `\(` / `\[`); ~76% of articles have no math and now skip the AST walk and SQLite warm-up on every open.
+
 ## [0.4.1] — 2026-06-23
 
 ### Fixed
