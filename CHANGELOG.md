@@ -7,6 +7,7 @@
 - **Inline TeX math tokenization** — splits `\(…\)` (inline) and `\[…\]` (display) out of text into `math` AST nodes. A full-corpus audit found 450 articles (~24%) use TeX (122,263 equations, zero MathML) — something a tag census alone would miss.
 - **Build-time math pre-render pipeline** — `scripts/renderMath.cjs` (MathJax-in-Node, `mathjax-full`) renders each unique equation to a self-contained SVG (`fill="currentColor"`, drawn natively by the existing `react-native-svg`); `scripts/buildMathSvg.cjs` dedups by content hash (3.1×). Whole-encyclopedia math = **21.3 MB gzipped**, built in ~32 s, so no math engine ships on device.
 - **Corpus audit tooling** — `scripts/auditCorpus.cjs` (sharded fetch + cache-only parse modes) validates the parser against all 1,838 articles: **0 parse exceptions**, 0 untokenized math delimiters.
+- **Native block renderer** (`src/utils/sepHtml/render/`) — `SepArticle`/`Blocks`/`Inline`/`MathSvg` render the AST as native RN components matching the reader typography: scroll-progress + scroll-spy via `onScroll`/`onLayout`, a fast single-`<Text>` path for non-math paragraphs and a word-tokenized flex-wrap path for inline math, display math as centered SVG blocks, and `react-native-svg` drawing the build-time equations. Typecheck-clean; not yet wired into `ArticleScreen` (pending on-device verification).
 
 ### Changed
 - `htmlparser2` pinned to `^9.1.0` (dual CJS/ESM) for clean Metro/Jest resolution; v12 is ESM-only.

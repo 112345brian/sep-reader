@@ -1,0 +1,58 @@
+// AST for SEP article bodies, produced by parse.ts and consumed by the native
+// renderer. Intentionally narrow: it models only the tags SEP actually emits.
+// Anything outside this set becomes an `unsupported` block that the renderer
+// routes to a WebView fallback, so we never silently drop content.
+
+export type Inline =
+  | { t: 'text'; v: string }
+  | { t: 'em'; kind: 'em' | 'strong'; children: Inline[] }
+  // Deprecated/secondary inline formatting SEP still emits (u, s, small, q).
+  | { t: 'styled'; style: 'underline' | 'strike' | 'small' | 'quote'; children: Inline[] }
+  | { t: 'link'; href: string; wl: boolean; children: Inline[] }
+  // Footnote marker, e.g. <sup><a href="#note-1">1</a></sup>. Kept distinct
+  // from `link` so the renderer can wire it to the native footnote sheet.
+  | { t: 'fnref'; href: string; label: string }
+  | { t: 'sup'; children: Inline[] }
+  | { t: 'sub'; children: Inline[] }
+  | { t: 'code'; v: string }
+  // TeX math extracted from text (\(…\) inline, \[…\] display). 450 SEP
+  // articles use this; `tex` is the raw source, pre-rendered to SVG at build
+  // time. `display` marks block-style (centered, own line) vs inline.
+  | { t: 'math'; tex: string; display: boolean };
+
+export interface TableRow {
+  header: boolean;
+  cells: Inline[][];
+}
+
+export interface TableBlock {
+  t: 'table';
+  caption?: Inline[];
+  rows: TableRow[];
+}
+
+export interface DefRow {
+  term: Inline[];
+  def: Block[];
+}
+
+export type Block =
+  | { t: 'heading'; level: 2 | 3 | 4 | 5 | 6; id?: string; children: Inline[] }
+  | { t: 'para'; children: Inline[] }
+  | { t: 'list'; ordered: boolean; items: Block[][] }
+  | { t: 'blockquote'; children: Block[] }
+  | { t: 'deflist'; rows: DefRow[] }
+  | TableBlock
+  | { t: 'image'; src: string; alt: string }
+  | { t: 'rule' }
+  // Content the native renderer can't faithfully show (MathJax script blocks,
+  // equation images embedded mid-flow, nested tables, unknown tags). Carries
+  // the raw HTML so a scoped WebView can render just this fragment.
+  | { t: 'unsupported'; reason: string; html: string };
+
+export interface ParsedArticle {
+  blocks: Block[];
+  // True if any block is `unsupported` — lets the screen decide whether to
+  // pre-warm a WebView fallback.
+  hasUnsupported: boolean;
+}

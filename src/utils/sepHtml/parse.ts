@@ -1,0 +1,330 @@
+import { parseDocument, DomUtils } from 'htmlparser2';
+import type { Block, Inline, ParsedArticle, TableRow, DefRow } from './types';
+
+// Minimal structural view of the htmlparser2 / domhandler node shape. We avoid
+// importing domhandler's own types so we aren't coupled to its internals.
+interface DomNode {
+  type: string; // 'tag' | 'text' | 'comment' | 'script' | 'style' | ...
+  name?: string;
+  data?: string;
+  attribs?: Record<string, string>;
+  children?: DomNode[];
+}
+
+const BLOCK_TAGS = new Set([
+  'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
+  'blockquote', 'dl', 'table', 'hr', 'img', 'div', 'section',
+]);
+
+// Container divs we descend into rather than render. SEP wraps the real article
+// in <div id="main-text"> and nests #preamble / #toc / #pubinfo as siblings.
+const TRANSPARENT_IDS = new Set(['main-text', 'aueditable', 'article-content']);
+// Sibling sections inside the body we skip — they're rendered as native chrome
+// elsewhere (the screen renders preamble/toc/title itself).
+const SKIP_IDS = new Set(['preamble', 'toc', 'pubinfo']);
+
+function isTag(n: DomNode): boolean {
+  return n.type === 'tag';
+}
+
+function getId(n: DomNode): string | undefined {
+  return n.attribs?.id;
+}
+
+function outerHtml(n: DomNode): string {
+  // DomUtils.getOuterHTML accepts the loose node shape at runtime.
+  return DomUtils.getOuterHTML(n as never, { decodeEntities: false });
+}
+
+// ── Inline parsing ───────────────────────────────────────────────────────────
+
+// Split a text run into text + TeX-math nodes. SEP delimits inline math with
+// \(…\) and display math with \[…\]; the closing \) / \] delimiters are
+// unambiguous (a literal ) or ] in TeX is not backslash-escaped), so a
+// non-greedy scan is safe. Unbalanced delimiters (no close in this text node)
+// simply stay as text rather than swallowing the rest.
+const MATH_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g;
+function splitMath(text: string): Inline[] {
+  if (text.indexOf('\\(') === -1 && text.indexOf('\\[') === -1) {
+    return [{ t: 'text', v: text }];
+  }
+  const out: Inline[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  MATH_RE.lastIndex = 0;
+  while ((m = MATH_RE.exec(text)) !== null) {
+    if (m.index > last) out.push({ t: 'text', v: text.slice(last, m.index) });
+    if (m[1] !== undefined) out.push({ t: 'math', tex: m[1].trim(), display: false });
+    else out.push({ t: 'math', tex: m[2].trim(), display: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ t: 'text', v: text.slice(last) });
+  return out;
+}
+
+function parseInlines(nodes: DomNode[]): Inline[] {
+  const out: Inline[] = [];
+  for (const n of nodes) {
+    if (n.type === 'text') {
+      if (n.data) out.push(...splitMath(n.data));
+      continue;
+    }
+    if (!isTag(n) || !n.name) continue;
+    const name = n.name.toLowerCase();
+    const kids = n.children ?? [];
+    switch (name) {
+      case 'em':
+      case 'i':
+        out.push({ t: 'em', kind: 'em', children: parseInlines(kids) });
+        break;
+      case 'strong':
+      case 'b':
+        out.push({ t: 'em', kind: 'strong', children: parseInlines(kids) });
+        break;
+      case 'cite':
+        // Bibliographic cite → italic, same as <em>.
+        out.push({ t: 'em', kind: 'em', children: parseInlines(kids) });
+        break;
+      case 'u':
+        out.push({ t: 'styled', style: 'underline', children: parseInlines(kids) });
+        break;
+      case 's':
+      case 'strike':
+      case 'del':
+        out.push({ t: 'styled', style: 'strike', children: parseInlines(kids) });
+        break;
+      case 'small':
+        out.push({ t: 'styled', style: 'small', children: parseInlines(kids) });
+        break;
+      case 'q':
+        out.push({ t: 'styled', style: 'quote', children: parseInlines(kids) });
+        break;
+      case 'a': {
+        const href = n.attribs?.href ?? '';
+        const cls = n.attribs?.class ?? '';
+        out.push({
+          t: 'link',
+          href,
+          wl: /\bwl\b/.test(cls),
+          children: parseInlines(kids),
+        });
+        break;
+      }
+      case 'sup': {
+        // A <sup> wrapping a single anchor to a note/footnote is a footnote ref.
+        const anchor = kids.find(
+          k => isTag(k) && k.name?.toLowerCase() === 'a' && /^#/.test(k.attribs?.href ?? '')
+        );
+        const href = anchor?.attribs?.href ?? '';
+        if (anchor && /#(note|fn)/i.test(href)) {
+          out.push({ t: 'fnref', href, label: textOf(anchor).replace(/[[\]]/g, '') });
+        } else {
+          out.push({ t: 'sup', children: parseInlines(kids) });
+        }
+        break;
+      }
+      case 'sub':
+        out.push({ t: 'sub', children: parseInlines(kids) });
+        break;
+      case 'code':
+      case 'tt':
+        out.push({ t: 'code', v: textOf(n) });
+        break;
+      case 'br':
+        out.push({ t: 'text', v: '\n' });
+        break;
+      case 'span':
+        // Spans are presentational in SEP; flatten their children.
+        out.push(...parseInlines(kids));
+        break;
+      default:
+        // Unknown inline-ish tag: keep its text so we never lose words.
+        out.push(...parseInlines(kids));
+    }
+  }
+  return out;
+}
+
+function textOf(n: DomNode): string {
+  if (n.type === 'text') return n.data ?? '';
+  return (n.children ?? []).map(textOf).join('');
+}
+
+// ── Block parsing ────────────────────────────────────────────────────────────
+
+function parseListItems(listNode: DomNode): Block[][] {
+  const items: Block[][] = [];
+  for (const li of listNode.children ?? []) {
+    if (!isTag(li) || li.name?.toLowerCase() !== 'li') continue;
+    items.push(parseBlocks(li.children ?? []));
+  }
+  return items;
+}
+
+function parseDefList(dlNode: DomNode): DefRow[] {
+  const rows: DefRow[] = [];
+  let pendingTerm: Inline[] | null = null;
+  for (const child of dlNode.children ?? []) {
+    if (!isTag(child)) continue;
+    const name = child.name?.toLowerCase();
+    if (name === 'dt') {
+      pendingTerm = parseInlines(child.children ?? []);
+    } else if (name === 'dd') {
+      rows.push({ term: pendingTerm ?? [], def: parseBlocks(child.children ?? []) });
+      pendingTerm = null;
+    }
+  }
+  return rows;
+}
+
+function parseTable(tableNode: DomNode): Block {
+  const rows: TableRow[] = [];
+  // Caption (e.g. "The Four Causes") — rendered as a label above the table.
+  const captionNode = (tableNode.children ?? []).find(
+    c => isTag(c) && c.name?.toLowerCase() === 'caption'
+  );
+  const caption = captionNode ? parseInlines(captionNode.children ?? []) : undefined;
+  // Flatten thead/tbody/tfoot; collect <tr>.
+  const trs: DomNode[] = [];
+  const collect = (n: DomNode) => {
+    for (const c of n.children ?? []) {
+      if (!isTag(c)) continue;
+      const cn = c.name?.toLowerCase();
+      if (cn === 'tr') trs.push(c);
+      else if (cn === 'thead' || cn === 'tbody' || cn === 'tfoot') collect(c);
+    }
+  };
+  collect(tableNode);
+  for (const tr of trs) {
+    const cells: Inline[][] = [];
+    let header = false;
+    for (const cell of tr.children ?? []) {
+      if (!isTag(cell)) continue;
+      const cn = cell.name?.toLowerCase();
+      if (cn === 'th') header = true;
+      if (cn === 'th' || cn === 'td') cells.push(parseInlines(cell.children ?? []));
+    }
+    if (cells.length) rows.push({ header, cells });
+  }
+  // Nested tables or tables with block content in cells are beyond the native
+  // grid; flag for fallback if any cell itself contained a table.
+  const hasNested = DomUtils.findOne(
+    (e: never) => (e as DomNode).name?.toLowerCase() === 'table',
+    tableNode.children as never,
+    true
+  );
+  if (hasNested) {
+    return { t: 'unsupported', reason: 'nested-table', html: outerHtml(tableNode) };
+  }
+  return { t: 'table', caption, rows };
+}
+
+function parseBlocks(nodes: DomNode[]): Block[] {
+  const out: Block[] = [];
+  // Accumulate loose inline content (text/links between block tags) into paras.
+  let inlineBuffer: DomNode[] = [];
+  const flush = () => {
+    if (!inlineBuffer.length) return;
+    const inlines = parseInlines(inlineBuffer);
+    inlineBuffer = [];
+    if (inlines.some(i => i.t !== 'text' || i.v.trim() !== '')) {
+      out.push({ t: 'para', children: inlines });
+    }
+  };
+
+  for (const n of nodes) {
+    if (n.type === 'text') {
+      inlineBuffer.push(n);
+      continue;
+    }
+    if (n.type === 'comment') continue;
+    if (n.type === 'script' || n.type === 'style') {
+      // MathJax/script: route the surrounding nothing — scripts alone carry no
+      // visible text, so skip. (Equation <img> is handled as a block below.)
+      continue;
+    }
+    if (!isTag(n) || !n.name) continue;
+    const name = n.name.toLowerCase();
+
+    if (!BLOCK_TAGS.has(name)) {
+      // Inline-level tag at block scope (a, em, sup, …): buffer it.
+      inlineBuffer.push(n);
+      continue;
+    }
+
+    flush();
+    const kids = n.children ?? [];
+
+    switch (name) {
+      case 'div':
+      case 'section': {
+        const id = getId(n);
+        if (id && SKIP_IDS.has(id)) break;
+        // Descend into container divs; their block children join the flow.
+        out.push(...parseBlocks(kids));
+        break;
+      }
+      case 'p':
+        out.push({ t: 'para', children: parseInlines(kids) });
+        break;
+      case 'h1':
+      case 'h2':
+      case 'h3':
+      case 'h4':
+      case 'h5':
+      case 'h6': {
+        const level = Math.max(2, Number(name[1])) as 2 | 3 | 4 | 5 | 6;
+        // id may be on the heading or on a child <a name>/<a id>.
+        let id = getId(n);
+        if (!id) {
+          const anchor = kids.find(k => isTag(k) && k.name?.toLowerCase() === 'a');
+          id = anchor?.attribs?.name ?? anchor?.attribs?.id;
+        }
+        out.push({ t: 'heading', level, id, children: parseInlines(kids) });
+        break;
+      }
+      case 'ul':
+      case 'ol':
+        out.push({ t: 'list', ordered: name === 'ol', items: parseListItems(n) });
+        break;
+      case 'li':
+        // Stray <li> outside a list: treat as a paragraph.
+        out.push({ t: 'para', children: parseInlines(kids) });
+        break;
+      case 'blockquote':
+        out.push({ t: 'blockquote', children: parseBlocks(kids) });
+        break;
+      case 'dl':
+        out.push({ t: 'deflist', rows: parseDefList(n) });
+        break;
+      case 'table':
+        out.push(parseTable(n));
+        break;
+      case 'hr':
+        out.push({ t: 'rule' });
+        break;
+      case 'img': {
+        const src = n.attribs?.src ?? '';
+        // Inline equation images (SEP names them with .png in /entries/.../) are
+        // fine to show; keep as image block with absolute-ish src resolution
+        // deferred to the renderer.
+        out.push({ t: 'image', src, alt: n.attribs?.alt ?? '' });
+        break;
+      }
+    }
+  }
+  flush();
+  return out;
+}
+
+// ── Public API ───────────────────────────────────────────────────────────────
+
+export function parseSepHtml(html: string): ParsedArticle {
+  const doc = parseDocument(html, { decodeEntities: true });
+  const roots = (doc.children ?? []) as unknown as DomNode[];
+  const blocks = parseBlocks(roots);
+  return {
+    blocks,
+    hasUnsupported: blocks.some(b => b.t === 'unsupported'),
+  };
+}

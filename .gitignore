@@ -78,3 +78,6 @@ yarn-error.log
 .expo
 dist/
 web-build/
+
+# Corpus audit / build-time renderer working dir (scraped HTML cache, compiled parser, math store)
+.audit/
