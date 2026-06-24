@@ -376,6 +376,16 @@ export async function setReadProgress(slug: string, progress: number): Promise<v
   );
 }
 
+// Force-set read progress without ratcheting — used for "mark as read/unread".
+export async function forceSetReadProgress(slug: string, progress: number): Promise<void> {
+  const db = await getDb();
+  const clamped = Math.max(0, Math.min(1, progress));
+  await db.runAsync(
+    'UPDATE entries SET read_progress = ? WHERE slug = ?',
+    [clamped, slug]
+  );
+}
+
 export async function getRecentSlugs(limit = 20): Promise<EntrySummary[]> {
   const db = await getDb();
   // Most recently read unique slugs, with progress / annotation count / excerpt

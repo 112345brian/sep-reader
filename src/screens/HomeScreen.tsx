@@ -10,7 +10,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   searchEntries, getRecentSlugs, getBookmarks, getAllAnnotations,
-  toggleBookmark, getAllEntries,
+  toggleBookmark, getAllEntries, forceSetReadProgress,
 } from '../services/db';
 import type { EntrySummary } from '../types';
 import type { AnnotationWithTitle } from '../services/db';
@@ -260,13 +260,18 @@ export default function HomeScreen() {
 
   const open = (slug: string, title: string) => nav.navigate('Article', { slug, title });
 
-  const handleIconPress = (item: EntrySummary, isBookmarked: boolean) => {
-    const bmLabel = isBookmarked ? 'Remove Bookmark' : 'Bookmark';
+  const handleIconPress = async (item: EntrySummary) => {
+    await toggleBookmark(item.slug, item.title);
+    loadData();
+  };
+
+  const handleIconLongPress = (item: EntrySummary) => {
+    const isRead = (item.read_progress ?? 0) >= 1;
     Alert.alert(item.title, undefined, [
       {
-        text: bmLabel,
+        text: isRead ? 'Mark as Unread' : 'Mark as Read',
         onPress: async () => {
-          await toggleBookmark(item.slug, item.title);
+          await forceSetReadProgress(item.slug, isRead ? 0 : 1);
           loadData();
         },
       },
@@ -417,7 +422,7 @@ export default function HomeScreen() {
         <FlatList
           data={results}
           keyExtractor={i => i.slug}
-          renderItem={({ item }) => <PageRow item={item} onPress={open} isBookmarked={bookmarkSlugs.has(item.slug)} onIconPress={i => handleIconPress(i, bookmarkSlugs.has(i.slug))} />}
+          renderItem={({ item }) => <PageRow item={item} onPress={open} isBookmarked={bookmarkSlugs.has(item.slug)} onIconPress={handleIconPress} onIconLongPress={handleIconLongPress} />}
           contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={
@@ -450,14 +455,14 @@ export default function HomeScreen() {
             <FlatList
               data={recentHistory}
               keyExtractor={i => i.slug}
-              renderItem={({ item }) => <PageRow item={item} onPress={open} isBookmarked={bookmarkSlugs.has(item.slug)} onIconPress={i => handleIconPress(i, bookmarkSlugs.has(i.slug))} />}
+              renderItem={({ item }) => <PageRow item={item} onPress={open} isBookmarked={bookmarkSlugs.has(item.slug)} onIconPress={handleIconPress} onIconLongPress={handleIconLongPress} />}
               contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
               ListHeaderComponent={
                 <>
                   {bookmarks.length > 0 && (
                     <>
                       <Text style={styles.secLabel}>Bookmarks</Text>
-                      {bookmarks.map(item => <PageRow key={item.slug} item={item} onPress={open} isBookmarked onIconPress={i => handleIconPress(i, true)} />)}
+                      {bookmarks.map(item => <PageRow key={item.slug} item={item} onPress={open} isBookmarked onIconPress={handleIconPress} onIconLongPress={handleIconLongPress} />)}
                     </>
                   )}
                   {recentHistory.length > 0 && bookmarks.length > 0 && <Text style={styles.secLabel}>Recent</Text>}
@@ -588,12 +593,13 @@ export default function HomeScreen() {
 // ── Page row ───────────────────────────────────────────────────────────────
 
 function PageRow({
-  item, onPress, isBookmarked = false, onIconPress,
+  item, onPress, isBookmarked = false, onIconPress, onIconLongPress,
 }: {
   item: EntrySummary;
   onPress: (slug: string, title: string) => void;
   isBookmarked?: boolean;
   onIconPress?: (item: EntrySummary) => void;
+  onIconLongPress?: (item: EntrySummary) => void;
 }) {
   const pct = Math.round((item.read_progress ?? 0) * 100);
   const annCount = item.annotation_count ?? 0;
@@ -609,6 +615,8 @@ function PageRow({
       <TouchableOpacity
         style={[styles.pageRowIcon, isBookmarked && styles.pageRowIconBookmarked]}
         onPress={() => onIconPress?.(item)}
+        onLongPress={() => onIconLongPress?.(item)}
+        delayLongPress={400}
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         activeOpacity={0.6}
       >
