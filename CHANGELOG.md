@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] — 2026-06-23
 
 ### Added
 - **Sub-entry parent breadcrumb** — entries that belong to a parent group (e.g. "Nietzsche's Aesthetics" under "aesthetics") now show the parent label as a small blue tag above the article title and in list rows (search results, history, bookmarks, links). The tag uses the same pill style as the article breadcrumb. Standalone entries (e.g. "Anarchism") are unaffected.
