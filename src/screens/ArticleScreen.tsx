@@ -381,7 +381,7 @@ export default function ArticleScreen() {
   // vertical-first (failOffsetY), so normal article scrolling is untouched.
   const swipeHome = Gesture.Pan()
     .activeOffsetX([-9999, 30])
-    .failOffsetY([-22, 22])
+    .failOffsetY([-40, 40])
     .onUpdate(e => {
       'worklet';
       if (e.translationX > 0) screenX.value = e.translationX;
