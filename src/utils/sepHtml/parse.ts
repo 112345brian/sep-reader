@@ -329,12 +329,48 @@ function hasUnsupportedBlock(blocks: Block[]): boolean {
   });
 }
 
+// Collect footnote definitions (elements whose id is "note-N" / "fn-N") into a
+// map keyed by id, so the renderer can resolve a footnote ref against the parsed
+// AST instead of re-scraping raw HTML on every tap. Trailing back-reference
+// anchors (the "↩" return link SEP appends) are dropped so the note reads clean.
+function inlineTextLen(inlines: Inline[]): number {
+  let len = 0;
+  for (const i of inlines) {
+    if (i.t === 'text' || i.t === 'code') len += i.v.length;
+    else if ('children' in i && Array.isArray(i.children)) len += inlineTextLen(i.children);
+  }
+  return len;
+}
+
+function collectFootnotes(nodes: DomNode[], out: Record<string, Inline[]>): void {
+  for (const n of nodes) {
+    if (!isTag(n)) continue;
+    const id = n.attribs?.id;
+    if (id && /^(note|fn|footnote)[-_]?\d/i.test(id) && !(id in out)) {
+      const inlines = parseInlines(n.children ?? []);
+      // Drop a trailing return-link (short anchor back to the ref point) and
+      // any trailing whitespace so the note reads clean in the popup.
+      while (inlines.length) {
+        const last = inlines[inlines.length - 1];
+        if (last.t === 'link' && inlineTextLen(last.children) <= 2) inlines.pop();
+        else if (last.t === 'text' && last.v.trim() === '') inlines.pop();
+        else break;
+      }
+      out[id] = inlines;
+    }
+    if (n.children) collectFootnotes(n.children, out);
+  }
+}
+
 export function parseSepHtml(html: string): ParsedArticle {
   const doc = parseDocument(html, { decodeEntities: true });
   const roots = (doc.children ?? []) as unknown as DomNode[];
   const blocks = parseBlocks(roots);
+  const footnotes: Record<string, Inline[]> = {};
+  collectFootnotes(roots, footnotes);
   return {
     blocks,
     hasUnsupported: hasUnsupportedBlock(blocks),
+    footnotes,
   };
 }

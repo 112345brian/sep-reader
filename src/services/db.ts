@@ -414,6 +414,14 @@ function buildTree(reads: ReadRow[]): ReadNode[] {
 
 const metaCache = new Map<string, string | null>();
 
+// Keep the in-memory cache in step with any code path that writes `meta`
+// directly (savePrefs, Zotero creds, importUserData) instead of via setMeta.
+// Without this, getMeta would keep serving the pre-write value for the rest of
+// the session (e.g. restored custom_css / font_size silently ignored).
+function cacheMeta(key: string, value: string | null): void {
+  metaCache.set(key, value);
+}
+
 export async function getMeta(key: string): Promise<string | null> {
   if (metaCache.has(key)) return metaCache.get(key)!;
   const db = await getDb();
@@ -460,6 +468,10 @@ export async function savePrefs(prefs: Prefs): Promise<void> {
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_library_scope', ?)", [prefs.libraryScope]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('onboarding_done', 'true')");
   });
+  cacheMeta('pref_home', prefs.homeMode);
+  cacheMeta('pref_download_all', String(prefs.downloadAll));
+  cacheMeta('pref_library_scope', prefs.libraryScope);
+  cacheMeta('onboarding_done', 'true');
 }
 
 export async function toggleBookmark(slug: string, title: string): Promise<boolean> {
@@ -693,6 +705,8 @@ export async function saveZoteroPrefs(apiKey: string, userId: string): Promise<v
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_api_key', ?)", [apiKey]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('zotero_user_id', ?)", [userId]);
   });
+  cacheMeta('zotero_api_key', apiKey);
+  cacheMeta('zotero_user_id', userId);
 }
 
 // ── Annotations ──────────────────────────────────────────────────────────────
@@ -828,6 +842,7 @@ export async function importUserData(data: UserDataExport): Promise<void> {
       await db.runAsync(
         'INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value]
       );
+      cacheMeta(key, value as string);
     }
   });
 }

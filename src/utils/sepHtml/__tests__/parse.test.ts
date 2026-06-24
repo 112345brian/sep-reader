@@ -96,4 +96,20 @@ describe('parseSepHtml', () => {
     expect(() => parseSepHtml('<p>orphan</p>')).not.toThrow();
     expect(() => parseSepHtml('<<<malformed')).not.toThrow();
   });
+
+  it('collects footnote definitions keyed by id, dropping the return link', () => {
+    const html = `<div id="main-text"><p>Body<sup><a href="#note-1">1</a></sup>.</p>
+      <div id="notes"><ol><li id="note-1"><p>The footnote text. <a href="#ref-1">↩</a></p></li></ol></div></div>`;
+    const { footnotes } = parseSepHtml(html);
+    expect(footnotes['note-1']).toBeDefined();
+    const text = footnotes['note-1'].map(i => (i.t === 'text' ? i.v : '')).join('');
+    expect(text).toContain('The footnote text.');
+    // The trailing "↩" return anchor is stripped.
+    expect(footnotes['note-1'].some(i => i.t === 'link')).toBe(false);
+  });
+
+  it('has no footnotes map entries for articles without notes', () => {
+    const { footnotes } = parseSepHtml('<div id="main-text"><p>Plain.</p></div>');
+    expect(Object.keys(footnotes)).toHaveLength(0);
+  });
 });

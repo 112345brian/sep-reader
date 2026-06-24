@@ -20,6 +20,9 @@ export interface SepArticleProps {
   annotations?: Annotation[];
   onAnnotationPress?: (ann: Annotation) => void;
   onAnnotationCreate?: (text: string) => void;
+  // Rendered inside the scroll view after the article body (e.g. the
+  // "Related by link" backlinks row).
+  footer?: React.ReactNode;
 }
 
 export interface SepArticleHandle {
@@ -28,7 +31,7 @@ export interface SepArticleHandle {
 
 export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(function SepArticle({
   article, resolveMath, onLinkPress, onFootnotePress, onProgress, onActiveSection, renderFallback,
-  resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate,
+  resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, footer,
 }, ref) {
   const scrollViewRef = useRef<ScrollView>(null);
   const headingOffsets = useRef<{ id: string; y: number }[]>([]);
@@ -94,6 +97,7 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
       <View>
         <Blocks blocks={article.blocks} h={handlers} />
       </View>
+      {footer}
     </ScrollView>
   );
 });

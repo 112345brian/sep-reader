@@ -3,17 +3,21 @@
 ## [Unreleased]
 
 ### Added
-- **Images in native renderer** — `case 'image'` blocks now render via RN `<Image>` with relative srcs resolved against `https://plato.stanford.edu/entries/{slug}/`. Previously all article figures were silently dropped.
-- **Annotation display in native renderer** — existing highlights appear as a colored left border on their paragraph; tapping opens the edit modal. Long-pressing any paragraph opens the annotation creation modal with the paragraph text pre-filled.
+- **Images in native renderer** — `case 'image'` blocks now render via RN `<Image>`, sized to each figure's intrinsic aspect ratio (`onLoad` → `aspectRatio`) instead of a fixed 180 px box, with relative srcs resolved against `https://plato.stanford.edu/entries/{slug}/`. Previously all article figures were silently dropped.
+- **Annotation display in native renderer** — highlights are painted on the exact matched text span within a paragraph (no-math fast path), supporting multiple highlights per paragraph; math paragraphs fall back to a whole-paragraph left border. Tapping a highlight opens the edit modal; long-pressing a paragraph opens the creation modal with its text pre-filled.
+- **Native footnote sheet from the AST** — the parser now collects footnote definitions into `ParsedArticle.footnotes` (keyed by id, return-link stripped); tapping a footnote ref resolves against that map and renders the note (rich inline, math/links intact) instead of re-scraping raw HTML per tap with a lossy entity decoder.
+- **Native "Related by link" footer** — backlink count now renders as a tappable row at the end of the article in native mode (was a WebView-only DOM injection that silently no-op'd once the native renderer became the default).
 - **`collectMathNodes`** (`mathStore.ts`) — walks a `ParsedArticle` block tree to collect all TeX nodes; used by `hydrateMath` to warm the SVG cache before render.
 
 ### Changed
-- **`has_math` flag on cached articles** — detected at cache time (string scan for `\(` / `\[`); ~76% of articles have no math and now skip the AST walk and SQLite warm-up on every open.
+- **Math warm-up gated on the parsed AST** — `hydrateMath` now runs whenever `collectMathNodes` finds math in the parsed article, rather than trusting the stored `has_math` flag (which defaults to 0 for articles cached before the column existed, so they'd wrongly skip warm-up forever). The `has_math` column is still detected at cache time as a hint.
 - **Native renderer enabled** — `USE_NATIVE_RENDERER = true`; article bodies now render via the custom native parser/renderer instead of WebView. `recordRead` is fire-and-forget (removes 2 SQLite round-trips from the navigation critical path); `getMeta` results are cached in memory (custom CSS and font size no longer re-queried on every article open); `buildArticleHtml` skipped in native mode.
 - **TOC jump wired for native** — `SepArticle` now exposes a `scrollToSection(id)` imperative handle via `forwardRef`; `handleTocJump` uses it instead of WebView JS injection.
 - **`resolveMath` wired** — native renderer uses the real on-device TeX→SVG resolver (`mathStore.resolveMath`) with SQLite-backed session cache; previous stub returned `null` for all math.
 
 ### Fixed
+- **In-app navigation for native links** — the native renderer's `onLinkPress` now mirrors the WebView's `handleNav`: in-page anchors (`#section`, bibliography refs) scroll within the article via `scrollToSection`, cross-article links (absolute `/entries/…` **and** relative `../slug/`) push a new Article screen, and only genuinely external links open the system browser. Previously in-page anchors and relative cross-article links were silently dropped in native mode.
+- **Stale in-memory `meta` cache** — `getMeta`'s cache is now kept in sync by `savePrefs`, `saveZoteroPrefs`, and `importUserData`, which write the `meta` table directly. Without this, a restore/sync (or pref change via those paths) left `getMeta` serving the pre-write value for the rest of the session — e.g. restored `custom_css` / `font_size` silently ignored until app restart.
 - **Swipe-right to go back** — gesture now reliably navigates back. Disabled the native stack's competing iOS back-swipe gesture (`gestureEnabled: false` on Article screen) and loosened the trigger condition so a moderate drag (60 px) or fast flick (300 px/s) commits, rather than requiring both simultaneously.
 - **Cross-article links opening Safari** — the WebView `baseUrl` was set to `https://plato.stanford.edu` (root), so relative links in cached article HTML (e.g. `../other-article/`) resolved to `/other-article/` instead of `/entries/other-article/`. They missed the intercept regex and fell through to `Linking.openURL`. Fixed by setting `baseUrl` to `https://plato.stanford.edu/entries/<slug>/`, matching the original page location.
 
