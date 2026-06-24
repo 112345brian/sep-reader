@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.3]
 
 ### Added
 - **Readable article during initialization** — on first launch with bulk download enabled, the Neoplatonism article is fetched in the background as soon as initialization begins. Once ready, a bouncing arrow and the article title appear at the bottom of the loading screen; swiping up reveals the article below a sticky loading bar so you can read while the library downloads.
