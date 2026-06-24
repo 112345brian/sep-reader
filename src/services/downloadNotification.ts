@@ -25,7 +25,9 @@ async function ensureChannel() {
 export async function startDownloadNotification(): Promise<void> {
   try {
     await ensureChannel();
-    const { status } = await Notifications.requestPermissionsAsync();
+    const { status } = await Notifications.requestPermissionsAsync({
+      ios: { allowAlert: true, allowBadge: false, allowSound: false },
+    });
     permissionGranted = status === 'granted';
     if (!permissionGranted) return;
 
@@ -48,6 +50,11 @@ export async function startDownloadNotification(): Promise<void> {
   } catch {}
 }
 
+async function isNotificationPresent(): Promise<boolean> {
+  const presented = await Notifications.getPresentedNotificationsAsync();
+  return presented.some(n => n.request.identifier === NOTIF_ID);
+}
+
 export async function updateDownloadNotification(done: number, total: number): Promise<void> {
   if (!permissionGranted) return;
   const now = Date.now();
@@ -56,6 +63,11 @@ export async function updateDownloadNotification(done: number, total: number): P
   lastUpdateDone = done;
   lastUpdateTime = now;
   try {
+    // Don't re-show if the user dismissed it.
+    if (!await isNotificationPresent()) return;
+    // Dismiss first — on iOS same-identifier trigger:null notifications stack
+    // rather than update in place, so we must remove the old one first.
+    await Notifications.dismissNotificationAsync(NOTIF_ID).catch(() => {});
     await Notifications.scheduleNotificationAsync({
       identifier: NOTIF_ID,
       content: {
