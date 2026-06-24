@@ -223,6 +223,7 @@ export default function ArticleScreen() {
       html: buildArticleHtml({
         slug: entry.slug,
         title: entry.title,
+        parentLabel: entry.parent_label,
         tocHtml: entry.toc_html ?? '',
         contentHtml: entry.content_html,
         preambleHtml: entry.preamble_html ?? '',

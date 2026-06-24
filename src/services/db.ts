@@ -20,6 +20,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE TABLE IF NOT EXISTS entries (
       slug         TEXT PRIMARY KEY,
       title        TEXT NOT NULL,
+      parent_label TEXT,
       author       TEXT,
       pub_date     TEXT,
       content_hash TEXT,
@@ -106,6 +107,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     db.runAsync('ALTER TABLE annotations ADD COLUMN content_hash TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN read_progress REAL DEFAULT 0').catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN excerpt TEXT').catch(() => {}),
+    db.runAsync('ALTER TABLE entries ADD COLUMN parent_label TEXT').catch(() => {}),
   ]);
 
   // One-time migration: clear articles cached before preamble_html column existed
@@ -188,16 +190,16 @@ export async function putMath(
 }
 
 export async function upsertIndexEntries(
-  entries: { slug: string; title: string }[]
+  entries: { slug: string; title: string; parent_label?: string | null }[]
 ): Promise<void> {
   const db = await getDb();
   await db.withTransactionAsync(async () => {
     for (const e of entries) {
       await db.runAsync(
-        `INSERT INTO entries (slug, title)
-         VALUES (?, ?)
-         ON CONFLICT(slug) DO UPDATE SET title = excluded.title`,
-        [e.slug, e.title]
+        `INSERT INTO entries (slug, title, parent_label)
+         VALUES (?, ?, ?)
+         ON CONFLICT(slug) DO UPDATE SET title = excluded.title, parent_label = excluded.parent_label`,
+        [e.slug, e.title, e.parent_label ?? null]
       );
       await db.runAsync(`DELETE FROM entries_fts WHERE slug = ?`, [e.slug]);
       await db.runAsync(`INSERT INTO entries_fts (slug, title) VALUES (?, ?)`, [e.slug, e.title]);
@@ -273,13 +275,13 @@ export async function searchEntries(query: string, limit = 60): Promise<EntrySum
   const db = await getDb();
   if (!query.trim()) {
     return db.getAllAsync<EntrySummary>(
-      `SELECT slug, title, author, cached_at FROM entries ORDER BY title ASC LIMIT ?`,
+      `SELECT slug, title, parent_label, author, cached_at FROM entries ORDER BY title ASC LIMIT ?`,
       [limit]
     );
   }
   const ftsQuery = query.trim().split(/\s+/).map(w => `"${w}"*`).join(' ');
   return db.getAllAsync<EntrySummary>(
-    `SELECT e.slug, e.title, e.author, e.cached_at
+    `SELECT e.slug, e.title, e.parent_label, e.author, e.cached_at
      FROM entries_fts fts
      JOIN entries e USING (slug)
      WHERE entries_fts MATCH ?
@@ -331,7 +333,7 @@ export async function getRecentSlugs(limit = 20): Promise<EntrySummary[]> {
   const db = await getDb();
   // Most recently read unique slugs, with progress / annotation count / excerpt
   return db.getAllAsync<EntrySummary>(
-    `SELECT r.slug, r.title, e.author, e.cached_at,
+    `SELECT r.slug, r.title, e.parent_label, e.author, e.cached_at,
             e.read_progress, e.excerpt,
             (SELECT COUNT(*) FROM annotations a WHERE a.slug = r.slug) AS annotation_count
      FROM reads r
@@ -473,7 +475,7 @@ export async function isBookmarked(slug: string): Promise<boolean> {
 export async function getBookmarks(): Promise<EntrySummary[]> {
   const db = await getDb();
   return db.getAllAsync<EntrySummary>(
-    `SELECT b.slug, b.title, e.author, e.cached_at,
+    `SELECT b.slug, b.title, e.parent_label, e.author, e.cached_at,
             e.read_progress, e.excerpt,
             (SELECT COUNT(*) FROM annotations a WHERE a.slug = b.slug) AS annotation_count
      FROM bookmarks b
@@ -510,11 +512,38 @@ export async function getAllEntryTitles(): Promise<{ slug: string; title: string
   );
 }
 
-export async function getAllEntries(): Promise<{ slug: string; title: string }[]> {
+export async function getAllEntries(): Promise<{ slug: string; title: string; parent_label: string | null }[]> {
   const db = await getDb();
-  return db.getAllAsync<{ slug: string; title: string }>(
-    `SELECT slug, title FROM entries WHERE title IS NOT NULL ORDER BY title ASC`
+  return db.getAllAsync<{ slug: string; title: string; parent_label: string | null }>(
+    `SELECT slug, title, parent_label FROM entries WHERE title IS NOT NULL ORDER BY title ASC`
   );
+}
+
+// Strip the old "Parent: " prefix from reads.title / bookmarks.title now that
+// parent_label is a first-class column. Called after every index sync; the WHERE
+// clause is a no-op once all titles are already clean.
+export async function cleanDenormalizedTitles(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`
+    UPDATE reads
+    SET title = SUBSTR(title, (SELECT LENGTH(e.parent_label) + 3 FROM entries e WHERE e.slug = reads.slug))
+    WHERE EXISTS (
+      SELECT 1 FROM entries e
+      WHERE e.slug = reads.slug
+        AND e.parent_label IS NOT NULL
+        AND reads.title LIKE (e.parent_label || ': %')
+    )
+  `);
+  await db.runAsync(`
+    UPDATE bookmarks
+    SET title = SUBSTR(title, (SELECT LENGTH(e.parent_label) + 3 FROM entries e WHERE e.slug = bookmarks.slug))
+    WHERE EXISTS (
+      SELECT 1 FROM entries e
+      WHERE e.slug = bookmarks.slug
+        AND e.parent_label IS NOT NULL
+        AND bookmarks.title LIKE (e.parent_label || ': %')
+    )
+  `);
 }
 
 // Link index: pre-built once at index-sync time, cached in meta.
@@ -577,7 +606,7 @@ export async function indexLinks(fromSlug: string, contentHtml: string): Promise
 export async function getLinksFrom(slug: string): Promise<EntrySummary[]> {
   const db = await getDb();
   return db.getAllAsync<EntrySummary>(
-    `SELECT e.slug, e.title, e.author, e.cached_at
+    `SELECT e.slug, e.title, e.parent_label, e.author, e.cached_at
      FROM links l
      JOIN entries e ON e.slug = l.to_slug
      WHERE l.from_slug = ?
@@ -589,7 +618,7 @@ export async function getLinksFrom(slug: string): Promise<EntrySummary[]> {
 export async function getLinksTo(slug: string): Promise<EntrySummary[]> {
   const db = await getDb();
   return db.getAllAsync<EntrySummary>(
-    `SELECT e.slug, e.title, e.author, e.cached_at
+    `SELECT e.slug, e.title, e.parent_label, e.author, e.cached_at
      FROM links l
      JOIN entries e ON e.slug = l.from_slug
      WHERE l.to_slug = ?

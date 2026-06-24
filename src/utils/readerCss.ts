@@ -129,6 +129,22 @@ export const READER_CSS = `
     margin-bottom: 0.5rem;
   }
 
+  /* Parent-group breadcrumb tag shown above sub-entry titles */
+  .entry-breadcrumb {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    background: rgba(91, 142, 245, 0.13);
+    border: 1px solid rgba(91, 142, 245, 0.30);
+    border-radius: 5px;
+    padding: 2px 9px;
+    opacity: 0.88;
+    margin-bottom: 0.55rem;
+  }
+
   h2 {
     font-family: var(--serif);
     font-size: 1.3rem;

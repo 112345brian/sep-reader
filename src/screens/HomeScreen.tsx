@@ -188,7 +188,7 @@ export default function HomeScreen() {
   const [annotations, setAnnotations] = useState<AnnotationWithTitle[]>([]);
   const [searching, setSearching]     = useState(false);
 
-  const [browseEntries, setBrowseEntries] = useState<{ slug: string; title: string }[]>([]);
+  const [browseEntries, setBrowseEntries] = useState<{ slug: string; title: string; parent_label: string | null }[]>([]);
   const [browseLoaded, setBrowseLoaded]   = useState(false);
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
@@ -299,24 +299,26 @@ export default function HomeScreen() {
     // Filter out "see X" redirect entries — they're not real articles
     const filtered = browseEntries.filter(e => !e.title.includes(' — see ') && !e.title.includes('— see '));
 
-    // Group sub-entries (title contains ": ") by parent label.
-    // Only group if the part before ": " is a clean label (no em dash = not a redirect).
+    // Group sub-entries by parent_label. Fall back to colon-parsing for entries
+    // cached before the parent_label column existed (parent_label will be null).
     const parentMap = new Map<string, { slug: string | null; children: { slug: string; subTitle: string }[] }>();
     const standaloneKeys = new Set<string>(); // slugs that are standalone parents
 
     for (const e of filtered) {
-      const colonIdx = e.title.indexOf(': ');
-      if (colonIdx > 0) {
-        const label = e.title.slice(0, colonIdx);
-        if (label.includes(' — ') || label.includes(' - ')) continue; // skip mis-grouped redirects
-        const subTitle = e.title.slice(colonIdx + 2);
-        if (!parentMap.has(label)) parentMap.set(label, { slug: null, children: [] });
-        parentMap.get(label)!.children.push({ slug: e.slug, subTitle });
-      }
+      const label = e.parent_label ?? (() => {
+        const idx = e.title.indexOf(': ');
+        if (idx <= 0) return null;
+        const l = e.title.slice(0, idx);
+        return (l.includes(' — ') || l.includes(' - ')) ? null : l;
+      })();
+      if (!label) continue;
+      const subTitle = e.parent_label ? e.title : e.title.slice(label.length + 2);
+      if (!parentMap.has(label)) parentMap.set(label, { slug: null, children: [] });
+      parentMap.get(label)!.children.push({ slug: e.slug, subTitle });
     }
     // Mark standalone entries that share a name with a parent label
     for (const e of filtered) {
-      if (e.title.indexOf(': ') < 0) {
+      if (!e.parent_label && e.title.indexOf(': ') < 0) {
         if (parentMap.has(e.title)) {
           parentMap.get(e.title)!.slug = e.slug;
           standaloneKeys.add(e.slug);
@@ -329,17 +331,13 @@ export default function HomeScreen() {
     const addedParentLabels = new Set<string>();
 
     for (const e of filtered) {
-      const colonIdx = e.title.indexOf(': ');
-      if (colonIdx > 0) {
-        const label = e.title.slice(0, colonIdx);
-        if (label.includes(' — ') || label.includes(' - ')) {
-          // Mis-grouped redirect — render as standalone
-          const first = e.title[0] ?? '';
-          const letter = /[0-9]/.test(first) ? '#' : first.toUpperCase();
-          if (!groups[letter]) groups[letter] = [];
-          groups[letter].push({ kind: 'entry', slug: e.slug, title: e.title });
-          continue;
-        }
+      const label = e.parent_label ?? (() => {
+        const idx = e.title.indexOf(': ');
+        if (idx <= 0) return null;
+        const l = e.title.slice(0, idx);
+        return (l.includes(' — ') || l.includes(' - ')) ? null : l;
+      })();
+      if (label) {
         if (addedParentLabels.has(label)) continue;
         addedParentLabels.add(label);
         const info = parentMap.get(label)!;
@@ -616,6 +614,9 @@ function PageRow({
         <IconDoc color={isBookmarked ? C.accent : C.textHint} />
       </TouchableOpacity>
       <View style={styles.pageRowBody}>
+        {item.parent_label ? (
+          <View style={styles.parentTag}><Text style={styles.parentTagText}>{item.parent_label}</Text></View>
+        ) : null}
         <Text style={styles.pageRowTitle} numberOfLines={2}>{item.title}</Text>
         {meta ? <Text style={styles.pageRowMeta} numberOfLines={1}>{meta}</Text> : null}
         {item.excerpt ? <Text style={styles.pageRowExcerpt} numberOfLines={2}>{item.excerpt}</Text> : null}
@@ -735,6 +736,17 @@ const styles = StyleSheet.create({
     backgroundColor: C.accentDim,
   },
   pageRowBody: { flex: 1, minWidth: 0 },
+  parentTag: {
+    alignSelf: 'flex-start',
+    backgroundColor: C.accentDim,
+    borderColor: C.accentBorder,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginBottom: 4,
+  },
+  parentTagText: { fontSize: 10, fontWeight: '500', color: C.accent, letterSpacing: 0.3 },
   pageRowTitle: { fontSize: 14, fontWeight: '500', color: C.text, lineHeight: 18 },
   pageRowMeta: { fontSize: 12, color: C.textHint, marginTop: 2 },
   pageRowExcerpt: { fontSize: 12, color: C.textHint, marginTop: 3, lineHeight: 17 },
