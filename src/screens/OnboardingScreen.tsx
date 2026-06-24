@@ -7,6 +7,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { savePrefs } from '../services/db';
 import type { Prefs } from '../services/db';
 
+const SCOPE_DOWNLOAD_DESC: Record<Prefs['libraryScope'], string> = {
+  all:  'Fetch all ~1,800 SEP articles + OWL ontology upfront. Works fully offline from day one.',
+  sep:  'Fetch all ~1,800 Stanford Encyclopedia articles upfront (~400 MB). Works fully offline from day one.',
+  owl:  'Fetch the full OWL ontology upfront. Works fully offline from day one.',
+};
+
 interface Props {
   onDone: (prefs: Prefs) => void;
 }
@@ -18,7 +24,8 @@ export default function OnboardingScreen({ onDone }: Props) {
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>('welcome');
   const [homeMode, setHomeMode] = useState<Prefs['homeMode']>('search');
-  const [downloadAll, setDownloadAll] = useState(false);
+  const [downloadAll, setDownloadAll] = useState(true);
+  const [libraryScope, setLibraryScope] = useState<Prefs['libraryScope']>('all');
 
   const stepIndex = STEPS.indexOf(step);
 
@@ -29,7 +36,7 @@ export default function OnboardingScreen({ onDone }: Props) {
   };
 
   const finish = async () => {
-    const prefs: Prefs = { homeMode, downloadAll };
+    const prefs: Prefs = { homeMode, downloadAll, libraryScope };
     await savePrefs(prefs);
     onDone(prefs);
   };
@@ -47,7 +54,12 @@ export default function OnboardingScreen({ onDone }: Props) {
       <View style={styles.content}>
         {step === 'welcome' && <WelcomeStep />}
         {step === 'library' && (
-          <LibraryStep value={downloadAll} onChange={setDownloadAll} />
+          <LibraryStep
+            value={downloadAll}
+            onChange={setDownloadAll}
+            scope={libraryScope}
+            onScopeChange={setLibraryScope}
+          />
         )}
         {step === 'home' && (
           <HomeStep value={homeMode} onChange={setHomeMode} />
@@ -68,9 +80,9 @@ function WelcomeStep() {
   return (
     <View style={styles.stepWrap}>
       <Text style={styles.logo}>Nous</Text>
-      <Text style={styles.title}>Stanford Encyclopedia{'\n'}of Philosophy</Text>
+      <Text style={styles.title}>Philosophy{'\n'}Reference</Text>
       <Text style={styles.sub}>
-        The world's most authoritative philosophy reference, always in your pocket.
+        The world's most authoritative philosophy encyclopedias, always in your pocket.
       </Text>
     </View>
   );
@@ -79,30 +91,70 @@ function WelcomeStep() {
 function LibraryStep({
   value,
   onChange,
+  scope,
+  onScopeChange,
 }: {
   value: boolean;
   onChange: (v: boolean) => void;
+  scope: Prefs['libraryScope'];
+  onScopeChange: (v: Prefs['libraryScope']) => void;
 }) {
   return (
     <View style={styles.stepWrap}>
       <Text style={styles.stepTitle}>Build your library</Text>
       <Text style={styles.stepSub}>
-        How would you like to access articles?
+        Which encyclopedias would you like to include?
       </Text>
 
+      <ScopeToggle value={scope} onChange={onScopeChange} />
+
+      <Text style={[styles.stepSub, { marginTop: 24 }]}>
+        When should articles be available?
+      </Text>
+
+      <Option
+        selected={value}
+        onPress={() => onChange(true)}
+        title="Download everything now"
+        description={SCOPE_DOWNLOAD_DESC[scope]}
+        badge="Recommended"
+      />
       <Option
         selected={!value}
         onPress={() => onChange(false)}
         title="As I read"
         description="Articles download the first time you open them and stay cached for offline reading."
-        badge="Recommended"
       />
-      <Option
-        selected={value}
-        onPress={() => onChange(true)}
-        title="Download everything now"
-        description="Fetch all ~1,800 articles upfront (~400 MB). Works fully offline from day one."
-      />
+    </View>
+  );
+}
+
+function ScopeToggle({
+  value,
+  onChange,
+}: {
+  value: Prefs['libraryScope'];
+  onChange: (v: Prefs['libraryScope']) => void;
+}) {
+  const options: { key: Prefs['libraryScope']; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'sep', label: 'Stanford Encyclopedia' },
+    { key: 'owl', label: 'The OWL' },
+  ];
+  return (
+    <View style={styles.scopeRow}>
+      {options.map(o => (
+        <TouchableOpacity
+          key={o.key}
+          style={[styles.scopeChip, value === o.key && styles.scopeChipActive]}
+          onPress={() => onChange(o.key)}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.scopeChipText, value === o.key && styles.scopeChipTextActive]}>
+            {o.label}
+          </Text>
+        </TouchableOpacity>
+      ))}
     </View>
   );
 }
@@ -272,6 +324,34 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     paddingHorizontal: 5,
     paddingVertical: 2,
+  },
+
+  // Scope toggle
+  scopeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginBottom: 4,
+  },
+  scopeChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    backgroundColor: '#171717',
+  },
+  scopeChipActive: {
+    borderColor: '#7ba4ff',
+    backgroundColor: '#131a2e',
+  },
+  scopeChipText: {
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  scopeChipTextActive: {
+    color: '#7ba4ff',
   },
 
   // CTA

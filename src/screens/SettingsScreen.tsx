@@ -22,7 +22,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<Nav>();
-  const [prefs, setPrefs] = useState<Prefs>({ homeMode: 'search', downloadAll: false });
+  const [prefs, setPrefs] = useState<Prefs>({ homeMode: 'search', downloadAll: true, libraryScope: 'all' });
   const [cachedCount, setCachedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [lastSync, setLastSync] = useState<string | null>(null);
@@ -147,7 +147,7 @@ export default function SettingsScreen() {
     setDlAbort(abort);
     setDlProgress({ done: 0, total: 0, current: '' });
     try {
-      await downloadAll(p => setDlProgress(p), abort.signal);
+      await downloadAll(p => setDlProgress(p), abort.signal, prefs.libraryScope);
     } finally {
       setDlAbort(null);
       setDlProgress(null);
@@ -294,6 +294,23 @@ export default function SettingsScreen() {
 
         {/* Library */}
         <Section title="Library">
+          <View style={[styles.row, { flexWrap: 'wrap', paddingVertical: 12 }]}>
+            <Text style={[styles.rowLabel, { marginRight: 12 }]}>Sources</Text>
+            <View style={scopeStyles.row}>
+              {(['all', 'sep', 'owl'] as const).map(s => (
+                <TouchableOpacity
+                  key={s}
+                  style={[scopeStyles.chip, prefs.libraryScope === s && scopeStyles.chipActive]}
+                  onPress={() => updatePref('libraryScope', s)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[scopeStyles.chipText, prefs.libraryScope === s && scopeStyles.chipTextActive]}>
+                    {s === 'all' ? 'All' : s === 'sep' ? 'Stanford Encyclopedia' : 'The OWL'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
           <Row label="Index entries" value={`${totalCount.toLocaleString()} articles`} />
           <Row label="Downloaded" value={`${cachedCount.toLocaleString()} (${cachePercent}%)`} />
           {lastSync && <Row label="Last synced" value={lastSync} />}
@@ -463,4 +480,16 @@ const styles = StyleSheet.create({
     paddingTop: 8, paddingBottom: 6,
     fontFamily: Platform.OS === 'ios' || Platform.OS === 'macos' ? 'Menlo' : 'monospace',
   },
+});
+
+const scopeStyles = StyleSheet.create({
+  row: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', flex: 1 },
+  chip: {
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 14, borderWidth: 1,
+    borderColor: S.border, backgroundColor: S.bg,
+  },
+  chipActive: { borderColor: S.accent, backgroundColor: '#162040' },
+  chipText: { color: S.textDim, fontSize: 13, fontWeight: '500' },
+  chipTextActive: { color: S.accent },
 });

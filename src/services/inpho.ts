@@ -13,6 +13,7 @@
  *      related thinkers that exist in our corpus.
  */
 import * as FileSystem from 'expo-file-system';
+import { documentDirectory } from 'expo-file-system/legacy';
 import { getMeta, setMeta } from './db';
 import {
   inphoIndexCount, replaceInphoIndex, getInphoNodeBySep,
@@ -77,7 +78,7 @@ export async function syncInphoIndex(): Promise<boolean> {
 // scripts/inject-dev-seeds.sh rather than hitting inphoproject.org.
 async function seedFromDevFiles(): Promise<boolean> {
   if (!__DEV__) return false;
-  const dir = FileSystem.documentDirectory + 'dev-seeds/';
+  const dir = documentDirectory + 'dev-seeds/';
   try {
     const [ideaText, thinkerText] = await Promise.all([
       FileSystem.readAsStringAsync(dir + 'inpho-idea.json'),

@@ -106,6 +106,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     db.runAsync('ALTER TABLE annotations ADD COLUMN content_hash TEXT').catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN read_progress REAL DEFAULT 0').catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN excerpt TEXT').catch(() => {}),
+    db.runAsync("ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'sep'").catch(() => {}),
   ]);
 
   // One-time migration: clear articles cached before preamble_html column existed
@@ -423,17 +424,19 @@ export async function setMeta(key: string, value: string): Promise<void> {
 export interface Prefs {
   homeMode: 'search' | 'continue';
   downloadAll: boolean;
+  libraryScope: 'all' | 'sep' | 'owl';
 }
 
 export async function getPrefs(): Promise<Prefs> {
   const db = await getDb();
   const rows = await db.getAllAsync<{ key: string; value: string }>(
-    "SELECT key, value FROM meta WHERE key IN ('pref_home', 'pref_download_all')"
+    "SELECT key, value FROM meta WHERE key IN ('pref_home', 'pref_download_all', 'pref_library_scope')"
   );
   const map = Object.fromEntries(rows.map(r => [r.key, r.value]));
   return {
     homeMode: (map['pref_home'] as Prefs['homeMode']) ?? 'search',
-    downloadAll: map['pref_download_all'] === 'true',
+    downloadAll: map['pref_download_all'] !== 'false',
+    libraryScope: (map['pref_library_scope'] as Prefs['libraryScope']) ?? 'all',
   };
 }
 
@@ -442,6 +445,7 @@ export async function savePrefs(prefs: Prefs): Promise<void> {
   await db.withTransactionAsync(async () => {
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_home', ?)", [prefs.homeMode]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_download_all', ?)", [String(prefs.downloadAll)]);
+    await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('pref_library_scope', ?)", [prefs.libraryScope]);
     await db.runAsync("INSERT OR REPLACE INTO meta VALUES ('onboarding_done', 'true')");
   });
 }
@@ -489,17 +493,23 @@ export async function clearArticleCache(): Promise<void> {
   );
 }
 
-export async function getAllUncachedSlugs(): Promise<{ slug: string; title: string }[]> {
+export async function getAllUncachedSlugs(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{ slug: string; title: string }[]> {
   const db = await getDb();
+  const where = scope === 'all'
+    ? 'cached_at IS NULL'
+    : `cached_at IS NULL AND source = '${scope}'`;
   return db.getAllAsync<{ slug: string; title: string }>(
-    'SELECT slug, title FROM entries WHERE cached_at IS NULL ORDER BY title ASC'
+    `SELECT slug, title FROM entries WHERE ${where} ORDER BY title ASC`
   );
 }
 
-export async function getCachedSlugs(): Promise<{ slug: string; title: string }[]> {
+export async function getCachedSlugs(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{ slug: string; title: string }[]> {
   const db = await getDb();
+  const where = scope === 'all'
+    ? 'cached_at IS NOT NULL'
+    : `cached_at IS NOT NULL AND source = '${scope}'`;
   return db.getAllAsync<{ slug: string; title: string }>(
-    'SELECT slug, title FROM entries WHERE cached_at IS NOT NULL ORDER BY cached_at DESC'
+    `SELECT slug, title FROM entries WHERE ${where} ORDER BY cached_at DESC`
   );
 }
 
