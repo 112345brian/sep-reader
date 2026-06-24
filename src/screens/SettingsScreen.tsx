@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Alert, ScrollView, TextInput, Platform,
+  Alert, ScrollView, TextInput, Platform, Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -368,7 +368,25 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </Section>
 
-        <Text style={styles.version}>Nous · v0.1.0</Text>
+        {/* Support */}
+        <Section title="Support">
+          <TouchableOpacity style={styles.row} onPress={() => Linking.openURL('https://plato.stanford.edu/support/')} activeOpacity={0.7}>
+            <View style={styles.supportTextWrap}>
+              <Text style={styles.rowLabel}>Donate to the SEP</Text>
+              <Text style={styles.supportSub}>Keep the encyclopedia free for everyone</Text>
+            </View>
+            <Text style={styles.rowValue}>↗</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => Linking.openURL('https://ko-fi.com/112345brian')} activeOpacity={0.7}>
+            <View style={styles.supportTextWrap}>
+              <Text style={styles.rowLabel}>Buy me a coffee</Text>
+              <Text style={styles.supportSub}>If you have anything left over</Text>
+            </View>
+            <Text style={styles.rowValue}>↗</Text>
+          </TouchableOpacity>
+        </Section>
+
+        <Text style={styles.version}>Nous · v0.6.2</Text>
         <Text style={styles.attribution}>
           Powered by the Stanford Encyclopedia of Philosophy
         </Text>
@@ -452,6 +470,8 @@ const styles = StyleSheet.create({
   rowLast: { borderBottomWidth: 0 },
   rowLabel: { color: S.text, fontSize: 15 },
   rowValue: { color: S.textDim, fontSize: 14 },
+  supportTextWrap: { flex: 1 },
+  supportSub: { color: S.textDim, fontSize: 12, marginTop: 2 },
   checkmark: { color: S.accent, fontSize: 15 },
   actionLabel: { color: S.textDim, fontSize: 15 },
   actionAccent: { color: S.accent },
