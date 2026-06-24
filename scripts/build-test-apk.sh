@@ -17,8 +17,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="$ROOT/src/testConfig.ts"
 OUT_DIR="$ROOT/test-results"
 APK="$ROOT/android/app/build/outputs/apk/debug/app-debug.apk"
-PACKAGE="com.sepreader"
-ACTIVITY="com.sepreader.MainActivity"
+PACKAGE="com.nous.app"
+ACTIVITY="com.nous.app.MainActivity"
 REPORT_DEVICE="/data/user/0/$PACKAGE/files/nous_test_report.json"
 
 NO_INSTALL=false

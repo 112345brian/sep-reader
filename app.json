@@ -7,7 +7,7 @@
     "version": "0.6.2",
     "orientation": "portrait",
     "android": {
-      "package": "com.nous.sepreader",
+      "package": "com.nous.app",
       "versionCode": 9
     },
     "plugins": [

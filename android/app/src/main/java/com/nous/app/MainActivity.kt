@@ -1,4 +1,4 @@
-package com.sepreader
+package com.nous.app
 import expo.modules.ReactActivityDelegateWrapper
 
 import com.facebook.react.ReactActivity

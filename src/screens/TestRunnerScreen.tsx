@@ -116,7 +116,7 @@ export default function TestRunnerScreen() {
             <Row label="Annotations"      value={String(report.db_snapshot.annotation_count)} />
             <Row label="Recent reads"     value={report.db_snapshot.recent_reads.map(r => r.title).join(', ') || 'none'} />
             <Row label="Report written"   value="nous_test_report.json" />
-            <Row label="Pull with"        value="adb pull /data/user/0/com.sepreader/files/nous_test_report.json" mono />
+            <Row label="Pull with"        value="adb pull /data/user/0/com.nous.app/files/nous_test_report.json" mono />
           </View>
         )}
       </ScrollView>
