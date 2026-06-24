@@ -38,6 +38,32 @@ function outerHtml(n: DomNode): string {
 
 // ── Inline parsing ───────────────────────────────────────────────────────────
 
+// Trim leading and trailing pure-whitespace text nodes from an inline array,
+// mirroring the browser rule: whitespace-only text between block elements is
+// invisible. Also strips any leading/trailing space character left by the
+// \s+→' ' collapse (e.g. "\n  Hello" → " Hello" → "Hello").
+function trimInlineEdges(inlines: Inline[]): Inline[] {
+  let s = 0;
+  while (s < inlines.length) {
+    const n = inlines[s];
+    if (n.t !== 'text') break;
+    const trimmed = n.v.trimStart();
+    if (trimmed === '') { s++; continue; }
+    if (trimmed !== n.v) inlines[s] = { ...n, v: trimmed };
+    break;
+  }
+  let e = inlines.length - 1;
+  while (e >= s) {
+    const n = inlines[e];
+    if (n.t !== 'text') break;
+    const trimmed = n.v.trimEnd();
+    if (trimmed === '') { e--; continue; }
+    if (trimmed !== n.v) inlines[e] = { ...n, v: trimmed };
+    break;
+  }
+  return inlines.slice(s, e + 1);
+}
+
 // Split a text run into text + TeX-math nodes. SEP delimits inline math with
 // \(…\) and display math with \[…\]; the closing \) / \] delimiters are
 // unambiguous (a literal ) or ] in TeX is not backslash-escaped), so a
@@ -226,7 +252,7 @@ function parseBlocks(nodes: DomNode[]): Block[] {
   let inlineBuffer: DomNode[] = [];
   const flush = () => {
     if (!inlineBuffer.length) return;
-    const inlines = parseInlines(inlineBuffer);
+    const inlines = trimInlineEdges(parseInlines(inlineBuffer));
     inlineBuffer = [];
     if (inlines.some(i => i.t !== 'text' || i.v.trim() !== '')) {
       out.push({ t: 'para', children: inlines });
@@ -266,7 +292,7 @@ function parseBlocks(nodes: DomNode[]): Block[] {
         break;
       }
       case 'p':
-        out.push({ t: 'para', children: parseInlines(kids) });
+        out.push({ t: 'para', children: trimInlineEdges(parseInlines(kids)) });
         break;
       case 'h1':
       case 'h2':
@@ -281,7 +307,7 @@ function parseBlocks(nodes: DomNode[]): Block[] {
           const anchor = kids.find(k => isTag(k) && k.name?.toLowerCase() === 'a');
           id = anchor?.attribs?.name ?? anchor?.attribs?.id;
         }
-        out.push({ t: 'heading', level, id, children: parseInlines(kids) });
+        out.push({ t: 'heading', level, id, children: trimInlineEdges(parseInlines(kids)) });
         break;
       }
       case 'ul':
@@ -290,7 +316,7 @@ function parseBlocks(nodes: DomNode[]): Block[] {
         break;
       case 'li':
         // Stray <li> outside a list: treat as a paragraph.
-        out.push({ t: 'para', children: parseInlines(kids) });
+        out.push({ t: 'para', children: trimInlineEdges(parseInlines(kids)) });
         break;
       case 'blockquote':
         out.push({ t: 'blockquote', children: parseBlocks(kids) });

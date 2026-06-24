@@ -1,5 +1,6 @@
 import React, { useCallback, useImperativeHandle, useRef } from 'react';
 import { ScrollView, View, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ParsedArticle } from '../types';
 import type { Annotation } from '../../../types';
 import { Blocks, BlockHandlers } from './Blocks';
@@ -33,6 +34,7 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
   article, resolveMath, onLinkPress, onFootnotePress, onProgress, onActiveSection, renderFallback,
   resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, footer,
 }, ref) {
+  const { bottom: bottomInset } = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
   const headingOffsets = useRef<{ id: string; y: number }[]>([]);
   const lastProgress = useRef(0);
@@ -90,7 +92,7 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
     <ScrollView
       ref={scrollViewRef}
       style={{ backgroundColor: SEP_COLORS.bg }}
-      contentContainerStyle={{ paddingHorizontal: SEP_SIDE_PAD, paddingTop: 16, paddingBottom: 96 }}
+      contentContainerStyle={{ paddingHorizontal: SEP_SIDE_PAD, paddingTop: 16, paddingBottom: 96 + bottomInset }}
       onScroll={handleScroll}
       scrollEventThrottle={16}
     >

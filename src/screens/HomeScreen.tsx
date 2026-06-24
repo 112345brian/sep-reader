@@ -92,6 +92,7 @@ function AlphabetScrubber({
   letters: string[];
   onSelect: (letter: string) => void;
 }) {
+  const { bottom: bottomInset } = useSafeAreaInsets();
   const [active, setActive] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const containerRef = useRef<View>(null);
@@ -153,7 +154,7 @@ function AlphabetScrubber({
     <View
       ref={containerRef}
       onLayout={onLayout}
-      style={[styles.scrubber, expanded && styles.scrubberExpanded]}
+      style={[styles.scrubber, expanded && styles.scrubberExpanded, { bottom: bottomInset }]}
       {...panResponder.panHandlers}
     >
       {letters.map(letter => (

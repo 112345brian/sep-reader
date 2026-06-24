@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator,
+  View, Text, StyleSheet, ActivityIndicator, InteractionManager,
   TouchableOpacity, Share, Linking, Pressable,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -161,17 +161,22 @@ export default function ArticleScreen() {
   const [footnote, setFootnote] = useState<{ inlines: Inline[] } | null>(null);
   const [backlinkCount, setBacklinkCount] = useState(0);
 
-  // Native-renderer AST (only parsed when the flag is on and content is ready).
-  // Key only on content_html — not the whole state object — so unrelated state
-  // changes (scroll progress, annotations, footnote popups) don't re-parse.
+  // Native-renderer AST — parsed after the navigation animation finishes so
+  // the incoming transition isn't blocked by the synchronous HTML parse.
+  const [nativeArticle, setNativeArticle] = useState<ReturnType<typeof parseSepHtml> | null>(null);
   const readyContentHtml = state.phase === 'ready' ? state.entry.content_html : null;
-  const nativeArticle = useMemo(
-    () => (USE_NATIVE_RENDERER && state.phase === 'ready'
-      ? parseSepHtml(state.entry.content_html ?? '')
-      : null),
+  useEffect(() => {
+    if (!USE_NATIVE_RENDERER || state.phase !== 'ready') {
+      setNativeArticle(null);
+      return;
+    }
+    const html = state.entry.content_html ?? '';
+    const task = InteractionManager.runAfterInteractions(() => {
+      setNativeArticle(parseSepHtml(html));
+    });
+    return () => task.cancel();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.phase, readyContentHtml],
-  );
+  }, [state.phase, readyContentHtml]);
 
   // Warm the math SVG cache from SQLite after parse so repeat visits skip re-render.
   // The parsed AST is the source of truth for whether math is present: collecting
@@ -438,15 +443,13 @@ export default function ArticleScreen() {
       if (e.translationY > 50) openGraph();
     });
 
-  // Bottom handle: tap OR swipe up → TOC sheet.
-  const tocTap = Gesture.Tap().runOnJS(true).onEnd(() => setShowToc(true));
+  // Bottom handle: tap (Pressable — instant) or swipe up (Pan gesture).
   const tocSwipe = Gesture.Pan()
     .runOnJS(true)
     .activeOffsetY(-12)
     .onEnd(e => {
       if (e.translationY < -25) setShowToc(true);
     });
-  const tocGesture = Gesture.Exclusive(tocSwipe, tocTap);
 
   return (
     <View style={styles.root}>
@@ -588,10 +591,14 @@ export default function ArticleScreen() {
             />
             )}
             {/* Swipe-up / tap TOC handle — positioned above system nav bar */}
-            <GestureDetector gesture={tocGesture}>
-              <View style={[styles.tocHandle, { bottom: insets.bottom }]}>
+            <GestureDetector gesture={tocSwipe}>
+              <Pressable
+                style={[styles.tocHandle, { bottom: insets.bottom }]}
+                onPress={() => setShowToc(true)}
+                hitSlop={{ top: 10, bottom: 10, left: 40, right: 40 }}
+              >
                 <View style={styles.tocHandlePill} />
-              </View>
+              </Pressable>
             </GestureDetector>
           </View>
 
