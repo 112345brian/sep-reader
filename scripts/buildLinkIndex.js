@@ -16,10 +16,10 @@ const sorted = [...seed].sort((a, b) => b.title.length - a.title.length);
 const entries = sorted.map(e => ({
   s: e.slug,
   t: e.title,
-  // Pre-escape regex special chars. This string goes into JSON then into
-  // new RegExp(...) — so one level of JSON unescaping happens before regex
-  // parsing, meaning a single backslash in the JS string is correct.
-  p: e.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+  // Pre-escape regex special chars, then add word boundaries so "war" doesn't
+  // match inside "reward". String goes into JSON then into new RegExp(), so
+  // one level of JSON unescaping happens before regex parsing.
+  p: '\\b' + e.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b',
 }));
 
 const json = JSON.stringify(entries);

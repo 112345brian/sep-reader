@@ -76,7 +76,7 @@ async function ensureGraphSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 // Shared DB handle with the InPhO schema guaranteed present.
 async function gdb(): Promise<SQLite.SQLiteDatabase> {
   const db = await getDb();
-  if (!_schema) _schema = ensureGraphSchema(db);
+  if (!_schema) _schema = ensureGraphSchema(db).catch(e => { _schema = null; throw e; });
   await _schema;
   return db;
 }
@@ -181,15 +181,26 @@ export async function getThinkersMissingDates(ids: number[]): Promise<InphoNodeR
   );
 }
 
-/** Replace the whole InPhO index in one transaction. */
+/** Replace the whole InPhO index in one transaction.
+ *  Lazily-backfilled birth/death years and dates_checked flags are preserved
+ *  across resyncs so a quarterly refresh doesn't force a full date re-fetch. */
 export async function replaceInphoIndex(nodes: InphoNodeRow[]): Promise<void> {
   const db = await gdb();
   await db.withTransactionAsync(async () => {
+    // Snapshot dates already fetched so we can restore them after the wipe.
+    const existing = await db.getAllAsync<{
+      kind: string; id: number;
+      birth_year: number | null; death_year: number | null; dates_checked: number;
+    }>('SELECT kind, id, birth_year, death_year, dates_checked FROM inpho_nodes WHERE dates_checked = 1 OR birth_year IS NOT NULL OR death_year IS NOT NULL');
+    const dateMap = new Map(existing.map(r => [`${r.kind}:${r.id}`, r]));
+
     await db.execAsync('DELETE FROM inpho_nodes');
     for (const n of nodes) {
+      const prev = dateMap.get(`${n.kind}:${n.id}`);
       await db.runAsync(
-        'INSERT OR REPLACE INTO inpho_nodes (id, kind, label, sep_dir) VALUES (?, ?, ?, ?)',
-        [n.id, n.kind, n.label, n.sep_dir ?? null]
+        'INSERT INTO inpho_nodes (id, kind, label, sep_dir, birth_year, death_year, dates_checked) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [n.id, n.kind, n.label, n.sep_dir ?? null,
+         prev?.birth_year ?? null, prev?.death_year ?? null, prev?.dates_checked ?? 0]
       );
     }
   });
@@ -199,19 +210,23 @@ export async function replaceInphoIndex(nodes: InphoNodeRow[]): Promise<void> {
 export async function getInphoNodeBySep(slug: string): Promise<InphoNodeRow | null> {
   const db = await gdb();
   const row = await db.getFirstAsync<InphoNodeRow>(
-    `SELECT id, kind, label, sep_dir FROM inpho_nodes WHERE sep_dir = ?
+    `SELECT id, kind, label, sep_dir, birth_year, death_year FROM inpho_nodes WHERE sep_dir = ?
      ORDER BY CASE kind WHEN 'idea' THEN 0 ELSE 1 END LIMIT 1`,
     [slug]
   );
   return row ?? null;
 }
 
+// Relations cache TTL: re-fetch after 7 days (InPhO updates monthly).
+const RELATIONS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 export async function getCachedInphoRelations(slug: string): Promise<InphoRelations | null> {
   const db = await gdb();
-  const row = await db.getFirstAsync<{ payload: string }>(
-    'SELECT payload FROM inpho_relations WHERE slug = ?', [slug]
+  const row = await db.getFirstAsync<{ payload: string; fetched_at: number }>(
+    'SELECT payload, fetched_at FROM inpho_relations WHERE slug = ?', [slug]
   );
   if (!row) return null;
+  if (Date.now() - row.fetched_at > RELATIONS_TTL_MS) return null;
   try { return JSON.parse(row.payload); } catch { return null; }
 }
 
@@ -288,9 +303,18 @@ export async function buildInfluenceGraph(centerSlug: string, infl: InphoInfluen
 export async function buildTimelineGraph(centerSlug: string, thinkerIds: number[]): Promise<GraphData> {
   const resolved = await resolveCorpusNodes([], thinkerIds, centerSlug);
   if (resolved.length === 0) return { nodes: [], edges: [] };
+  const db = await gdb();
   const { readSet, centerTitle } = await readSetAndTitle(centerSlug);
+  // Look up the center entry's own dates — if it's a thinker, it belongs on the timeline too.
+  const centerDates = await db.getFirstAsync<{ birth_year: number | null; death_year: number | null }>(
+    `SELECT birth_year, death_year FROM inpho_nodes WHERE sep_dir = ? AND kind = 'thinker' LIMIT 1`,
+    [centerSlug]
+  );
   const nodes: GraphNode[] = [
-    { slug: centerSlug, title: centerTitle, read: readSet.has(centerSlug), kind: 'entry' },
+    {
+      slug: centerSlug, title: centerTitle, read: readSet.has(centerSlug), kind: 'entry',
+      birthYear: centerDates?.birth_year ?? null, deathYear: centerDates?.death_year ?? null,
+    },
     ...resolved.map(r => ({
       slug: r.row.sep_dir as string, title: r.title, read: readSet.has(r.row.sep_dir as string),
       kind: 'thinker' as const, birthYear: r.row.birth_year ?? null, deathYear: r.row.death_year ?? null,

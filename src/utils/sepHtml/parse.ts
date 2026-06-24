@@ -319,12 +319,22 @@ function parseBlocks(nodes: DomNode[]): Block[] {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
+function hasUnsupportedBlock(blocks: Block[]): boolean {
+  return blocks.some(b => {
+    if (b.t === 'unsupported') return true;
+    if (b.t === 'blockquote') return hasUnsupportedBlock(b.children);
+    if (b.t === 'list') return b.items.some(item => hasUnsupportedBlock(item));
+    if (b.t === 'deflist') return b.rows.some(row => hasUnsupportedBlock(row.def));
+    return false;
+  });
+}
+
 export function parseSepHtml(html: string): ParsedArticle {
   const doc = parseDocument(html, { decodeEntities: true });
   const roots = (doc.children ?? []) as unknown as DomNode[];
   const blocks = parseBlocks(roots);
   return {
     blocks,
-    hasUnsupported: blocks.some(b => b.t === 'unsupported'),
+    hasUnsupported: hasUnsupportedBlock(blocks),
   };
 }

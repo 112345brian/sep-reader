@@ -81,3 +81,7 @@ web-build/
 
 # Corpus audit / build-time renderer working dir (scraped HTML cache, compiled parser, math store)
 .audit/
+
+# Dev-only InPhO seed files (fetched once via scripts/fetch-dev-seeds.js,
+# injected into simulator via scripts/inject-dev-seeds.sh — never shipped)
+dev-seeds/

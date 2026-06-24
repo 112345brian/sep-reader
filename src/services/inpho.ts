@@ -12,6 +12,7 @@
  *      relations once (cached), and build a navigable graph of related ideas +
  *      related thinkers that exist in our corpus.
  */
+import * as FileSystem from 'expo-file-system';
 import { getMeta, setMeta } from './db';
 import {
   inphoIndexCount, replaceInphoIndex, getInphoNodeBySep,
@@ -40,14 +41,8 @@ async function getJson(path: string): Promise<any | null> {
   }
 }
 
-/** Download the idea + thinker lists and replace the local index. */
-export async function syncInphoIndex(): Promise<boolean> {
-  const [ideaRaw, thinkerRaw] = await Promise.all([
-    getJson('/idea.json'),
-    getJson('/thinker.json'),
-  ]);
-  if (!ideaRaw || !thinkerRaw) return false;
-
+/** Parse raw idea/thinker JSON payloads and write them to the local index. */
+async function processAndStoreIndex(ideaRaw: any, thinkerRaw: any): Promise<boolean> {
   const ideas = unwrap<any[]>(ideaRaw);
   const thinkers = unwrap<any[]>(thinkerRaw);
   if (!Array.isArray(ideas) || !Array.isArray(thinkers)) return false;
@@ -68,6 +63,32 @@ export async function syncInphoIndex(): Promise<boolean> {
   return true;
 }
 
+/** Download the idea + thinker lists and replace the local index. */
+export async function syncInphoIndex(): Promise<boolean> {
+  const [ideaRaw, thinkerRaw] = await Promise.all([
+    getJson('/idea.json'),
+    getJson('/thinker.json'),
+  ]);
+  if (!ideaRaw || !thinkerRaw) return false;
+  return processAndStoreIndex(ideaRaw, thinkerRaw);
+}
+
+// In dev builds, seed the index from files injected into the simulator via
+// scripts/inject-dev-seeds.sh rather than hitting inphoproject.org.
+async function seedFromDevFiles(): Promise<boolean> {
+  if (!__DEV__) return false;
+  const dir = FileSystem.documentDirectory + 'dev-seeds/';
+  try {
+    const [ideaText, thinkerText] = await Promise.all([
+      FileSystem.readAsStringAsync(dir + 'inpho-idea.json'),
+      FileSystem.readAsStringAsync(dir + 'inpho-thinker.json'),
+    ]);
+    return processAndStoreIndex(JSON.parse(ideaText), JSON.parse(thinkerText));
+  } catch {
+    return false;
+  }
+}
+
 /** Ensure the index exists and isn't stale. Safe to call before every graph open. */
 export async function ensureInphoIndex(force = false): Promise<boolean> {
   const count = await inphoIndexCount();
@@ -75,6 +96,8 @@ export async function ensureInphoIndex(force = false): Promise<boolean> {
     const synced = Number((await getMeta(INDEX_SYNCED_KEY)) ?? 0);
     if (Date.now() - synced < INDEX_TTL_MS) return true;
   }
+  // In dev builds, prefer local seed files over the network.
+  if (await seedFromDevFiles()) return true;
   const ok = await syncInphoIndex();
   // If a refresh failed but we still have a usable index, keep using it.
   return ok || count > 0;
@@ -89,11 +112,16 @@ function yearOf(field: any): number | null {
   return typeof y === 'number' ? y : null;
 }
 
-/** Fetch + cache the related ids (and influence) for an entry from its detail record. */
-async function fetchRelations(node: InphoNodeRow): Promise<InphoRelations> {
+/**
+ * Fetch the related ids (and influence) for an entry from its detail record.
+ * Returns null on network failure so the caller knows not to cache the result
+ * — a null would otherwise be stored permanently, preventing future retries.
+ */
+async function fetchRelations(node: InphoNodeRow): Promise<InphoRelations | null> {
   const path = node.kind === 'idea' ? `/idea/${node.id}.json` : `/thinker/${node.id}.json`;
   const raw = await getJson(path);
-  const d = raw ? unwrap<any>(raw) : null;
+  if (!raw) return null;
+  const d = unwrap<any>(raw);
   // Ideas expose `related` (ideas) + `related_thinkers`; thinkers expose
   // `related_ideas` + `related_thinkers` + an influence network + dates.
   const ideas = node.kind === 'idea' ? num(d?.related) : num(d?.related_ideas);
@@ -110,22 +138,38 @@ async function fetchRelations(node: InphoNodeRow): Promise<InphoRelations> {
   return rel;
 }
 
-/** Lazily fetch birth/death years for thinker nodes missing them (Timeline view). */
+/** Lazily fetch birth/death years for thinker nodes missing them (Timeline view).
+ *  Runs in parallel batches of 5 to avoid blocking the render while being polite
+ *  to inphoproject.org. On network failure, leaves dates_checked=0 so the thinker
+ *  is retried the next time Timeline is opened. */
 async function backfillDates(thinkerIds: number[]): Promise<void> {
   const missing = await getThinkersMissingDates(thinkerIds);
-  // Cap concurrency to be polite; these are one-off per thinker and then cached.
-  for (const node of missing) {
-    const raw = await getJson(`/thinker/${node.id}.json`);
-    const d = raw ? unwrap<any>(raw) : null;
-    await setInphoDates(node.id, yearOf(d?.birth), yearOf(d?.death));
+  if (missing.length === 0) return;
+  const BATCH = 5;
+  for (let i = 0; i < missing.length; i += BATCH) {
+    await Promise.all(
+      missing.slice(i, i + BATCH).map(async node => {
+        const raw = await getJson(`/thinker/${node.id}.json`);
+        if (!raw) return; // leave dates_checked=0 — retry next time
+        const d = unwrap<any>(raw);
+        await setInphoDates(node.id, yearOf(d?.birth), yearOf(d?.death));
+      })
+    );
   }
 }
 
 async function getRelations(centerSlug: string, node: InphoNodeRow): Promise<InphoRelations> {
   let rel = await getCachedInphoRelations(centerSlug);
   if (!rel) {
-    rel = await fetchRelations(node);
-    await cacheInphoRelations(centerSlug, rel); // cache even when empty
+    const fetched = await fetchRelations(node);
+    if (fetched !== null) {
+      await cacheInphoRelations(centerSlug, fetched);
+      rel = fetched;
+    } else {
+      // Network failure — return empty for this session but don't persist so we
+      // retry on the next open.
+      rel = { ideas: [], thinkers: [] };
+    }
   }
   return rel;
 }

@@ -89,12 +89,35 @@ function flattenToTokens(inlines: Inline[], h: InlineHandlers, style: object, ou
       }
     } else if (node.t === 'link') {
       const ls = { ...style, ...linkStyle };
-      // links with inline math are rare; render their text words as one tappable token group
-      flattenToTokens(node.children, { ...h }, ls, out, keyRef);
-    } else if ('children' in node && Array.isArray(node.children)) {
-      const ns = node.t === 'em'
-        ? { ...style, ...(node.kind === 'strong' ? { fontWeight: '700' as const, color: SEP_COLORS.textBright } : { fontStyle: 'italic' as const }) }
-        : style;
+      const k = `l${keyRef.n++}`;
+      // Render as a single tappable <Text> so onPress is attached. Math inside
+      // links is rare; renderTextRuns' safety-net path (raw TeX text) handles it.
+      out.push(
+        <Text key={k} style={ls} onPress={() => h.onLinkPress?.(node.href, node.wl)}>
+          {renderTextRuns(node.children, h, k)}
+        </Text>
+      );
+    } else if (node.t === 'em') {
+      const ns = { ...style, ...(node.kind === 'strong'
+        ? { fontWeight: '700' as const, color: SEP_COLORS.textBright }
+        : { fontStyle: 'italic' as const }) };
+      flattenToTokens(node.children, h, ns, out, keyRef);
+    } else if (node.t === 'styled') {
+      if (node.style === 'quote') {
+        out.push(<Text key={`q${keyRef.n++}`} style={style}>{'"'}</Text>);
+        flattenToTokens(node.children, h, style, out, keyRef);
+        out.push(<Text key={`q${keyRef.n++}`} style={style}>{'"'}</Text>);
+      } else {
+        const ns = node.style === 'underline' ? { ...style, textDecorationLine: 'underline' as const }
+          : node.style === 'strike' ? { ...style, textDecorationLine: 'line-through' as const }
+          : { ...style, fontSize: (style as any).fontSize! * 0.85 }; // small
+        flattenToTokens(node.children, h, ns, out, keyRef);
+      }
+    } else if (node.t === 'sup') {
+      const ns = { ...style, fontSize: (style as any).fontSize! * 0.75 };
+      flattenToTokens(node.children, h, ns, out, keyRef);
+    } else if (node.t === 'sub') {
+      const ns = { ...style, fontSize: (style as any).fontSize! * 0.75 };
       flattenToTokens(node.children, h, ns, out, keyRef);
     } else if (node.t === 'fnref') {
       out.push(<Text key={`f${keyRef.n++}`} style={{ ...style, ...fnStyle }} onPress={() => h.onFootnotePress?.(node.href, node.label)}>{node.label}</Text>);

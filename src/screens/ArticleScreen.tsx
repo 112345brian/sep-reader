@@ -149,11 +149,15 @@ export default function ArticleScreen() {
   const [footnote, setFootnote] = useState<{ text: string } | null>(null);
 
   // Native-renderer AST (only parsed when the flag is on and content is ready).
+  // Key only on content_html — not the whole state object — so unrelated state
+  // changes (scroll progress, annotations, footnote popups) don't re-parse.
+  const readyContentHtml = state.phase === 'ready' ? state.entry.content_html : null;
   const nativeArticle = useMemo(
     () => (USE_NATIVE_RENDERER && state.phase === 'ready'
       ? parseSepHtml(state.entry.content_html ?? '')
       : null),
-    [state],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.phase, readyContentHtml],
   );
 
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null);
@@ -164,6 +168,10 @@ export default function ArticleScreen() {
       : editingAnnotation ?? null;
 
   const webRef = useRef<any>(null);
+  // Always-current snapshot of annotations for use in callbacks that can't
+  // take a dep on annotations without causing stale-closure bugs (handleLoadEnd).
+  const annotationsRef = useRef<Annotation[]>([]);
+  annotationsRef.current = annotations;
 
   useEffect(() => {
     isBookmarked(slug).then(setBookmarked);
@@ -227,8 +235,8 @@ export default function ArticleScreen() {
 
   const handleLoadEnd = useCallback(() => {
     setWebReady(true);
-    if (annotations.length > 0) injectAnnotations(annotations);
-  }, [annotations]);
+    if (annotationsRef.current.length > 0) injectAnnotations(annotationsRef.current);
+  }, []);
 
   function injectAnnotations(anns: Annotation[]) {
     webRef.current?.injectJavaScript(
@@ -299,11 +307,15 @@ export default function ArticleScreen() {
     const sepEntry = url.match(/plato\.stanford\.edu\/entries\/([a-z0-9-]+)\//);
     if (sepEntry) {
       const target = sepEntry[1];
-      if (target !== slug) nav.push('Article', { slug: target, title: target, fromSlug: slug });
-      return false;
+      if (target !== slug) {
+        nav.push('Article', { slug: target, title: target, fromSlug: slug });
+        return false;
+      }
+      // Same article (possibly with an #anchor) — let the WebView handle it.
+      return true;
     }
 
-    // Pure anchor navigation stays within the WebView; JS intercepts footnote taps first
+    // Relative anchor navigation stays within the WebView.
     if (url.includes('#') && !url.startsWith('http')) return true;
 
     if (url.startsWith('http')) {

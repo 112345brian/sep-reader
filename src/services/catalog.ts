@@ -107,10 +107,13 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
     const title = extractTitle(html) ?? slug;
     const tocHtml = extractById(html, 'toc');
     const preambleHtml = extractById(html, 'preamble');
-    const contentHtml =
+    const rawContentHtml =
       extractById(html, 'aueditable') || extractById(html, 'article-content');
 
-    if (!contentHtml) return false;
+    if (!rawContentHtml) return false;
+
+    // aueditable starts with <h1> (title) which the template re-adds itself.
+    const contentHtml = rawContentHtml.replace(/^\s*<!--[^>]*-->\s*/, '').replace(/^\s*<h1[^>]*>[\s\S]*?<\/h1>\s*/i, '');
 
     await cacheArticle(slug, {
       author: extractMetaContent(html, 'citation_author') ?? extractAuthor(html),

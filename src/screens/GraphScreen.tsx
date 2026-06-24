@@ -10,7 +10,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { getEntryPreview } from '../services/db';
 import { getArticleLinkGraph } from '../services/graphDb';
-import type { GraphNode, GraphEdge, GraphView } from '../services/graphDb';
+import type { GraphNode, GraphEdge, GraphData, GraphView } from '../services/graphDb';
 import { getGraph } from '../services/inpho';
 import type { RootStackParamList } from '../../App';
 
@@ -22,21 +22,40 @@ interface LayoutNode extends GraphNode {
   y: number;
 }
 
+// Seeded PRNG (xorshift-derived) so the same article+mode always produces the
+// same initial scatter, keeping the layout stable across mode switches/rotations.
+function seededRand(seed: number): () => number {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s = Math.imul(s ^ (s >>> 15), s | 1) >>> 0;
+    s = (s ^ (s + (Math.imul(s ^ (s >>> 7), s | 61) >>> 0))) >>> 0;
+    return (s ^ (s >>> 14)) / 0xffffffff;
+  };
+}
+
+function slugSeed(str: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193) >>> 0;
+  return h;
+}
+
 function forceLayout(
   nodes: GraphNode[],
   edges: GraphEdge[],
   width: number,
   height: number,
   centerSlug?: string,
+  seed = 0,
 ): LayoutNode[] {
   const W = width / 2, H = height / 2;
   const n = nodes.length;
   const k = Math.sqrt((width * height) / Math.max(n, 1)) * 0.8;
+  const rand = seededRand(seed);
 
   const layout: LayoutNode[] = nodes.map(node => ({
     ...node,
-    x: node.slug === centerSlug ? W : W + (Math.random() - 0.5) * width * 0.7,
-    y: node.slug === centerSlug ? H : H + (Math.random() - 0.5) * height * 0.7,
+    x: node.slug === centerSlug ? W : W + (rand() - 0.5) * width * 0.7,
+    y: node.slug === centerSlug ? H : H + (rand() - 0.5) * height * 0.7,
   }));
 
   const slugIndex = new Map(layout.map((n, i) => [n.slug, i]));
@@ -149,6 +168,7 @@ export default function GraphScreen() {
   const { width, height } = useWindowDimensions();
 
   const [mode, setMode] = useState<GraphView>('links');
+  const [rawData, setRawData] = useState<GraphData | null>(null);
   const [nodes, setNodes] = useState<LayoutNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState(true);
@@ -178,25 +198,35 @@ export default function GraphScreen() {
     })
   ).current;
 
+  // Data fetch — only re-runs when the entry or mode changes, not on rotation.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setRawData(null);
     // 'links' is the SEP hyperlink neighbourhood (our own link index); the other
     // modes are the InPhO semantic graph.
     const load = mode === 'links'
       ? getArticleLinkGraph(centerSlug ?? '')
       : getGraph(centerSlug ?? '', mode);
     load.then(data => {
-      if (cancelled) return;
-      const laid = mode === 'timeline'
-        ? timelineLayout(data.nodes, width, canvasH)
-        : forceLayout(data.nodes, data.edges, width, canvasH, centerSlug);
-      setNodes(laid);
-      setEdges(data.edges);
-      setLoading(false);
+      if (!cancelled) setRawData(data);
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [width, canvasH, centerSlug, mode]);
+  }, [centerSlug, mode]);
+
+  // Layout — recomputes whenever data or dimensions change (rotation re-lays
+  // without re-fetching). The seeded PRNG ensures stable scatter per entry+mode.
+  useEffect(() => {
+    if (!rawData) return;
+    const laid = mode === 'timeline'
+      ? timelineLayout(rawData.nodes, width, canvasH)
+      : forceLayout(rawData.nodes, rawData.edges, width, canvasH, centerSlug, slugSeed((centerSlug ?? '') + mode));
+    setNodes(laid);
+    setEdges(rawData.edges);
+    setLoading(false);
+  }, [rawData, width, canvasH, centerSlug, mode]);
 
   const nodeMap = useMemo(
     () => new Map(nodes.map(n => [n.slug, n])),
@@ -295,8 +325,10 @@ export default function GraphScreen() {
                 const isCenter = node.slug === centerSlug;
                 const kc = KIND_COLOR[node.kind ?? 'idea'] ?? KIND_COLOR.idea;
                 const r = isCenter ? 11 : node.kind === 'thinker' ? 7 : 6;
-                const fill = isCenter ? kc.fill : kc.fill;
+                const fill = kc.fill;
                 const stroke = kc.stroke;
+                // Unread linked neighbours are dimmed so read entries stand out.
+                const opacity = (!isCenter && mode === 'links' && !node.read) ? 0.35 : 1;
                 // In Timeline mode every node is labelled; otherwise only center + read.
                 const showLabel = mode === 'timeline' || node.read || isCenter;
                 const yr = typeof node.birthYear === 'number'
@@ -319,6 +351,7 @@ export default function GraphScreen() {
                       fill={fill}
                       stroke={stroke}
                       strokeWidth={1.5}
+                      opacity={opacity}
                     />
                     {showLabel && (
                       <SvgText
