@@ -193,6 +193,7 @@ export default function HomeScreen() {
   const debounce          = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sectionListRef    = useRef<SectionList<BrowseSectionItem>>(null);
   const pendingScrollRef  = useRef<string | null>(null);
+  const scrollRetriesRef  = useRef(0);
   const expandedLettersRef = useRef<Set<string>>(new Set());
 
   const loadData = useCallback(async () => {
@@ -372,19 +373,15 @@ export default function HomeScreen() {
     [browseSections, expandedLetters]
   );
 
-  const expandLetter = useCallback((letter: string) => {
-    if (expandedLettersRef.current.has(letter)) return;
-    expandedLettersRef.current = new Set(expandedLettersRef.current);
-    expandedLettersRef.current.add(letter);
-    setExpandedLetters(expandedLettersRef.current);
-  }, []);
-
   // Stable ref so SectionList never sees a changed onViewableItemsChanged prop.
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
     for (const vi of viewableItems) {
       if (!vi.isViewable || !vi.section) continue;
       const section = vi.section as BrowseSection;
       const letter = section.title;
+      // A pending alpha-jump has landed once its section is on screen — clear it
+      // so lazy-expand re-renders don't yank us back to it.
+      if (letter === pendingScrollRef.current) pendingScrollRef.current = null;
       if (expandedLettersRef.current.has(letter)) continue;
       // Expand when the last item of the truncated section scrolls into view.
       if (section.data[section.data.length - 1] === vi.item) {
@@ -395,19 +392,11 @@ export default function HomeScreen() {
     }
   });
 
-  const handleAlphaSelect = useCallback((letter: string) => {
-    pendingScrollRef.current = letter;
-    expandedLettersRef.current = new Set(expandedLettersRef.current);
-    expandedLettersRef.current.add(letter);
-    setExpandedLetters(expandedLettersRef.current);
-  }, []);
-
-  useEffect(() => {
+  const scrollToPendingLetter = useCallback(() => {
     const letter = pendingScrollRef.current;
     if (!letter || !sectionListRef.current) return;
     const idx = visibleBrowseSections.findIndex(s => s.title === letter);
     if (idx < 0) return;
-    pendingScrollRef.current = null;
     sectionListRef.current.scrollToLocation({
       sectionIndex: idx,
       itemIndex: 0,
@@ -415,6 +404,31 @@ export default function HomeScreen() {
       viewPosition: 0,
     });
   }, [visibleBrowseSections]);
+
+  // Jump to a letter. Don't expand the letter (or any passed over during a drag)
+  // — expanding bloats the list and pushes the target's index out of reach.
+  // The section already exists (truncated) in visibleBrowseSections, so we can
+  // scroll to it directly.
+  const handleAlphaSelect = useCallback((letter: string) => {
+    pendingScrollRef.current = letter;
+    scrollRetriesRef.current = 0;
+    scrollToPendingLetter();
+  }, [scrollToPendingLetter]);
+
+  // SectionList has no getItemLayout, so a jump to an unmeasured section fails.
+  // scrollToLocation doesn't advance the list on failure, so retrying it alone
+  // is futile. Instead jump approximately via averageItemLength × index, which
+  // renders the rows around the target, then retry scrollToLocation to land.
+  const onScrollToIndexFailed = useCallback((info: { averageItemLength: number; index: number }) => {
+    if (!pendingScrollRef.current) return;
+    if (scrollRetriesRef.current >= 12) { pendingScrollRef.current = null; return; }
+    scrollRetriesRef.current += 1;
+    sectionListRef.current?.getScrollResponder()?.scrollTo({
+      y: info.averageItemLength * info.index,
+      animated: false,
+    });
+    setTimeout(scrollToPendingLetter, 80);
+  }, [scrollToPendingLetter]);
 
   return (
     <GestureDetector gesture={swipeLeft}>
@@ -563,7 +577,7 @@ export default function HomeScreen() {
                     keyExtractor={item => item.kind === 'parent' ? `parent-${item.label}` : item.slug}
                     contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingLeft: 32 }}
                     stickySectionHeadersEnabled
-                    onScrollToIndexFailed={() => {}}
+                    onScrollToIndexFailed={onScrollToIndexFailed}
                     onViewableItemsChanged={onViewableItemsChanged.current}
                     viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
                     renderSectionHeader={({ section }) => (
