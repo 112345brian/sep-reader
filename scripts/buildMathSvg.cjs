@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /*
- * Build-time math store producer.
+ * Math corpus AUDIT / SIZING tool. NOT a shipped-asset producer.
  *
- * Walks the cached corpus, extracts every TeX equation, dedups by content hash
- * (3.2x — inline math is mostly repeated symbols), renders each unique equation
- * to SVG once via MathJax, and writes a keyed store:
+ * Walks the cached corpus, extracts every TeX equation, dedups by content hash,
+ * renders each unique equation to SVG via MathJax, and writes a keyed store to
+ * .audit/math-store.json (gitignored). It reports raw + gzipped size so we know
+ * the on-device cache's eventual footprint.
  *
- *   .audit/math-store.json  ->  { [hash]: { s: svg, w, h, d } }
- *
- * The eventual buildContentDb step folds this into the content DB (a `math`
- * table keyed by hash); article AST math nodes carry the hash and the app draws
- * the stored SVG with react-native-svg. Reports raw + gzipped size — gzip is
- * the real shipped cost since the asset is compressed.
+ * IMPORTANT: this output must NOT be folded into the content DB or app bundle.
+ * Math is rendered ON-DEVICE at runtime (src/utils/sepHtml/render/mathStore.ts):
+ * the client builds each SVG from fetched TeX and stores it locally. SEP-derived
+ * rendered output may not be redistributed — see NOTICE.md / AGENTS.md. This
+ * script exists only to measure and validate, never to ship.
  *
  * Usage: node scripts/buildMathSvg.cjs [limit]
  */

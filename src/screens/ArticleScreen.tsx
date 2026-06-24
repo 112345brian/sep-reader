@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator,
   TouchableOpacity, Share, Linking, Pressable,
@@ -21,6 +21,8 @@ import {
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { buildArticleHtml } from '../utils/articleTemplate';
+import { parseSepHtml } from '../utils/sepHtml/parse';
+import { SepArticle } from '../utils/sepHtml/render/SepArticle';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet from '../components/TocSheet';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
@@ -44,6 +46,12 @@ interface PendingAnnotation {
 }
 
 const SEP_BASE = 'https://plato.stanford.edu';
+
+// Flag-gated native renderer (off by default — WebView remains the default
+// reading surface). When on, the article body renders via the custom native
+// parser/renderer instead of the WebView. Math resolves to null here (TeX-text
+// fallback) until the build-time math store is wired through the content DB.
+const USE_NATIVE_RENDERER = false;
 
 // ── Icon helpers ───────────────────────────────────────────────────────────
 
@@ -139,6 +147,14 @@ export default function ArticleScreen() {
   const [showToc, setShowToc] = useState(false);
   const [showOverflow, setShowOverflow] = useState(false);
   const [footnote, setFootnote] = useState<{ text: string } | null>(null);
+
+  // Native-renderer AST (only parsed when the flag is on and content is ready).
+  const nativeArticle = useMemo(
+    () => (USE_NATIVE_RENDERER && state.phase === 'ready'
+      ? parseSepHtml(state.entry.content_html ?? '')
+      : null),
+    [state],
+  );
 
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
@@ -448,11 +464,23 @@ export default function ArticleScreen() {
           {/* ── WebView (swipe right → home) ── */}
           <GestureDetector gesture={swipeHome}>
           <View style={styles.webWrap}>
-            {!webReady && (
+            {!webReady && !USE_NATIVE_RENDERER && (
               <View style={styles.webOverlay}>
                 <ActivityIndicator color="#5b8ef5" />
               </View>
             )}
+            {USE_NATIVE_RENDERER && nativeArticle ? (
+              <SepArticle
+                article={nativeArticle}
+                resolveMath={() => null}
+                onLinkPress={(href) => {
+                  const m = href.match(/\/entries\/([a-z0-9-]+)\/?/);
+                  if (m && m[1] !== slug) nav.push('Article', { slug: m[1], title: m[1], fromSlug: slug });
+                }}
+                onFootnotePress={() => { /* footnote text wiring lands with the AST footnote map */ }}
+                onProgress={(v) => setReadProgress(slug, v).catch(() => {})}
+              />
+            ) : (
             <WebView
               ref={webRef}
               source={{ html: state.html, baseUrl: SEP_BASE }}
@@ -469,6 +497,7 @@ export default function ArticleScreen() {
               textZoom={100}
               androidLayerType="hardware"
             />
+            )}
             {/* Swipe-up / tap TOC handle — positioned above system nav bar */}
             <GestureDetector gesture={tocGesture}>
               <View style={[styles.tocHandle, { bottom: insets.bottom }]}>
