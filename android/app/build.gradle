@@ -93,8 +93,8 @@ android {
         applicationId "com.nous.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 9
-        versionName "0.6.2"
+        versionCode 10
+        versionName "0.6.3"
     }
     signingConfigs {
         debug {
@@ -104,10 +104,12 @@ android {
             keyPassword 'android'
         }
         release {
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
+            if (keystorePropertiesFile.exists()) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
         }
     }
     buildTypes {
