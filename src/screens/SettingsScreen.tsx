@@ -368,6 +368,24 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </Section>
 
+        {/* Credits */}
+        <Section title="Credits">
+          <TouchableOpacity style={styles.row} onPress={() => Linking.openURL('https://plato.stanford.edu')} activeOpacity={0.7}>
+            <View style={styles.supportTextWrap}>
+              <Text style={styles.rowLabel}>Stanford Encyclopedia of Philosophy</Text>
+              <Text style={styles.supportSub}>Content source</Text>
+            </View>
+            <Text style={styles.rowValue}>↗</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => Linking.openURL('https://www.inphoproject.org')} activeOpacity={0.7}>
+            <View style={styles.supportTextWrap}>
+              <Text style={styles.rowLabel}>InPhO, Indiana University</Text>
+              <Text style={styles.supportSub}>Semantic graph source</Text>
+            </View>
+            <Text style={styles.rowValue}>↗</Text>
+          </TouchableOpacity>
+        </Section>
+
         {/* Support */}
         <Section title="Support">
           <TouchableOpacity style={styles.row} onPress={() => Linking.openURL('https://plato.stanford.edu/support/')} activeOpacity={0.7}>
@@ -387,10 +405,6 @@ export default function SettingsScreen() {
         </Section>
 
         <Text style={styles.version}>Nous · v0.6.2</Text>
-        <Text style={styles.attribution}>
-          Powered by the Stanford Encyclopedia of Philosophy
-        </Text>
-        <Text style={styles.attributionUrl}>plato.stanford.edu</Text>
       </ScrollView>
     </View>
     </GestureDetector>
