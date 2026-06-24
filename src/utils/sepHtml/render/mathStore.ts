@@ -96,7 +96,7 @@ export function collectMathNodes(
       if (b.t === 'list') { b.items.forEach(item => fromBlocks(item)); continue; }
       if (b.t === 'blockquote') { fromBlocks(b.children); continue; }
       if (b.t === 'deflist') { b.rows.forEach(r => { fromInlines(r.term); fromBlocks(r.def); }); continue; }
-      if (b.t === 'table') { b.rows.forEach(r => r.cells.forEach(c => fromInlines(c))); continue; }
+      if (b.t === 'table') { if (b.caption) fromInlines(b.caption); b.rows.forEach(r => r.cells.forEach(c => fromInlines(c))); continue; }
     }
   }
   fromBlocks(blocks);

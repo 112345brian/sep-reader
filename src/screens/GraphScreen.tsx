@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
@@ -242,6 +242,7 @@ export default function GraphScreen() {
   // Keep sharedValues for canvas dimensions accessible in worklets
   const widthSV = useSharedValue(width);
   const canvasHSV = useSharedValue(canvasH);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { widthSV.value = width; canvasHSV.value = canvasH; }, [width, canvasH]);
 
   // Drive label visibility from zoom level
@@ -254,12 +255,9 @@ export default function GraphScreen() {
     },
   );
 
-  // Reset pan/zoom whenever the graph data changes
-  useEffect(() => {
-    scale.value = 1;
-    translateX.value = 0;
-    translateY.value = 0;
-  }, [nodes]);
+  // Reset pan/zoom whenever the graph data changes (shared values intentionally omitted)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { scale.value = 1; translateX.value = 0; translateY.value = 0; }, [nodes]);
 
   // ── Gestures ─────────────────────────────────────────────────────────────
   const panGesture = Gesture.Pan()

@@ -22,7 +22,7 @@ export interface Highlight {
 const linkStyle = { color: SEP_COLORS.accent, textDecorationLine: 'underline' as const };
 const fnStyle = { color: SEP_COLORS.accent, fontSize: sepText.body.fontSize! * 0.75 };
 
-function hasMath(inlines: Inline[]): boolean {
+export function hasMath(inlines: Inline[]): boolean {
   for (const i of inlines) {
     if (i.t === 'math') return true;
     if ('children' in i && Array.isArray(i.children) && hasMath(i.children)) return true;

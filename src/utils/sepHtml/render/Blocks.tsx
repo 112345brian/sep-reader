@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Text, View, Image, Pressable, type LayoutChangeEvent } from 'react-native';
 import type { Block, Inline } from '../types';
 import type { Annotation } from '../../../types';
-import { InlineContent, InlineHandlers, type Highlight } from './Inline';
+import { InlineContent, InlineHandlers, hasMath, type Highlight } from './Inline';
 import { MathSvg } from './MathSvg';
 import { SEP_COLORS, sepBlock, sepText } from './theme';
 
@@ -52,13 +52,6 @@ function inlineText(inlines: Inline[]): string {
   }).join('');
 }
 
-function hasMathNode(inlines: Inline[]): boolean {
-  for (const n of inlines) {
-    if (n.t === 'math') return true;
-    if ('children' in n && Array.isArray(n.children) && hasMathNode(n.children as Inline[])) return true;
-  }
-  return false;
-}
 
 // Resolve the annotations that match this paragraph into non-overlapping
 // character ranges over its plain text. Skips empty selections (which would
@@ -117,7 +110,7 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
       // annotations present, or long-press creation is enabled).
       const needsText = (h.annotations?.length ?? 0) > 0 || !!h.onAnnotationCreate;
       const paraText = needsText ? inlineText(block.children) : '';
-      const paraMath = hasMathNode(block.children);
+      const paraMath = hasMath(block.children);
       // Precise inline highlights only work on the no-math fast path (where the
       // renderer can map character offsets); math paragraphs fall back to a
       // whole-paragraph left border keyed to the first matching annotation.
