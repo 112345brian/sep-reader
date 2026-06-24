@@ -71,6 +71,7 @@ async function testArticleCache(assert: AssertFn) {
     pub_date: '2024',
     preamble_html: '<p>Published: 2024</p>',
     toc_html: '<li><a href="#s1">Section 1</a></li>',
+    content_ast: null,
     has_math: 0,
   });
   const entry = await getEntry(TEST_SLUG);

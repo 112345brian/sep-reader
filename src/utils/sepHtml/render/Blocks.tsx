@@ -137,8 +137,8 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
         : undefined;
 
       // Display math parses as an inline node but renders as a centered block,
-      // so split the paragraph around any display mathsvg nodes.
-      const hasDisplay = block.children.some(c => c.t === 'mathsvg' && c.display);
+      // so split the paragraph around any display math nodes.
+      const hasDisplay = block.children.some(c => (c.t === 'mathsvg' || c.t === 'mathref') && c.display);
       let inner: React.ReactNode;
       if (!hasDisplay) {
         inner = <InlineContent inlines={block.children} handlers={h} baseStyle={h.textStyle} highlights={highlights} />;
@@ -149,13 +149,16 @@ function BlockView({ block, h }: { block: Block; h: BlockHandlers }) {
           if (run.length) { segments.push(<InlineContent key={key} inlines={run} handlers={h} baseStyle={h.textStyle} />); run = []; }
         };
         block.children.forEach((c, i) => {
-          if (c.t === 'mathsvg' && c.display) {
+          if ((c.t === 'mathsvg' || c.t === 'mathref') && c.display) {
             flush(`r${i}`);
             const w = Math.max(1, Math.round(c.w * PX_PER_EX));
             const mh = Math.max(1, Math.round(c.h * PX_PER_EX));
+            const svg = c.t === 'mathsvg' ? c.svg : h.mathSvgs?.[c.hash];
             segments.push(
               <View key={`dm${i}`} style={{ alignItems: 'center', width: '100%', marginVertical: 14 }}>
-                <SvgXml xml={c.svg} width={w} height={mh} color={SEP_COLORS.text} />
+                {svg
+                  ? <SvgXml xml={svg} width={w} height={mh} color={SEP_COLORS.text} />
+                  : <View style={{ width: w, height: mh }} />}
               </View>
             );
           } else {

@@ -25,6 +25,8 @@ export interface SepArticleProps {
   // Rendered inside the scroll view after the article body (e.g. the
   // "Related by link" backlinks row).
   footer?: React.ReactNode;
+  // hash→svg map loaded from the math DB table after the article text renders.
+  mathSvgs?: Record<string, string>;
 }
 
 export interface SepArticleHandle {
@@ -33,7 +35,7 @@ export interface SepArticleHandle {
 
 export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(function SepArticle({
   article, onLinkPress, onFootnotePress, onProgress, onActiveSection, renderFallback,
-  resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, header, footer,
+  resolveImageSrc, annotations, onAnnotationPress, onAnnotationCreate, header, footer, mathSvgs,
 }, ref) {
   const { bottom: bottomInset } = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -86,6 +88,7 @@ export const SepArticle = React.forwardRef<SepArticleHandle, SepArticleProps>(fu
     annotations,
     onAnnotationPress,
     onAnnotationCreate,
+    mathSvgs,
   };
 
   return (

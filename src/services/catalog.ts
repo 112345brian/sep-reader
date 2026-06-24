@@ -1,13 +1,27 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntry, putMath, getMathSvgMap } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 import { renderMathBatch } from './mathRender';
+import { parseSepHtml } from '../utils/sepHtml/parse';
 
-// Replace all \(…\) and \[…\] TeX math in the raw HTML with <math-i> elements
-// whose text content is the base64-encoded pre-rendered SVG. The SVGs are
-// rendered by the off-screen MathRenderWebView (MathJax can't run on Hermes);
-// the parser later decodes <math-i> into `mathsvg` AST nodes, so no MathJax runs
-// at read time.
+// 64-bit hash of a TeX equation (or SVG bytes) + display flag. Two independent
+// djb2-xor passes with different seeds; birthday collision at ~2^32 unique inputs
+// vs. the ~65k bound of a 32-bit hash, making collisions essentially impossible
+// across the SEP corpus. Existing 8-char hashes (32-bit) in the DB remain valid.
+function mathHash(input: string, display: boolean): string {
+  let h1 = 5381, h2 = 52711;
+  const s = input + (display ? '\x01' : '\x00');
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = (((h1 << 5) + h1) ^ c) >>> 0;
+    h2 = (((h2 << 5) + h2) ^ c) >>> 0;
+  }
+  return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+}
+
+// Replace all \(…\) and \[…\] TeX math in the raw HTML with compact <math-i>
+// placeholder elements. SVGs are stored in the `math` DB table by hash so
+// content_html stays small — no inlined base64, no multi-MB HTML.
 const MATH_SUBST_RE = /\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g;
 async function substitutemath(html: string): Promise<string> {
   const spots: Array<{ index: number; len: number; tex: string; display: boolean }> = [];
@@ -27,19 +41,65 @@ async function substitutemath(html: string): Promise<string> {
 
   const results = await renderMathBatch(spots.map(s => ({ tex: s.tex, display: s.display })));
 
-  // Splice in reverse so earlier indices stay valid. Equations that failed to
-  // render (results[i].error) are left as raw TeX for the legacy fallback.
   let out = html;
   for (let i = spots.length - 1; i >= 0; i--) {
     const r = results[i];
     if (!r || r.error || !r.b64) continue;
-    const { index, len, display } = spots[i];
+    const { index, len, display, tex } = spots[i];
+    const hash = mathHash(tex, display);
     const w = (r.w ?? 1).toFixed(4);
     const h = (r.h ?? 1).toFixed(4);
-    const tag = `<math-i d="${display ? '1' : '0'}" w="${w}" h="${h}">${r.b64}</math-i>`;
+    // Store SVG in the math table (idempotent on hash).
+    await putMath(hash, atob(r.b64), r.w ?? 1, r.h ?? 1, display);
+    // Tiny placeholder — no base64 in HTML.
+    const tag = `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${w}" h="${h}"></math-i>`;
     out = out.slice(0, index) + tag + out.slice(index + len);
   }
   return out;
+}
+
+// One-time migration: rewrite articles that have the old inline-base64 format
+// (<math-i>BASE64</math-i>) to the new hash-reference format. Extracts the SVG
+// from each element, stores it in the math table, and replaces the element with
+// a compact hash placeholder. Guarded by a meta key.
+export async function backfillMathHashFormat(): Promise<void> {
+  const done = await getMeta('math_hash_format_v1');
+  if (done) return;
+  const articles = await getMathArticleHtml();
+  const LEGACY_RE = /<math-i([^>]*)>([A-Za-z0-9+/=]+)<\/math-i>/g;
+  for (const article of articles) {
+    await new Promise<void>(r => setTimeout(r, 32));
+    try {
+      let changed = false;
+      // Collect (hash→putMath) outside the synchronous replace callback so we
+      // can await them all before writing the updated HTML. This ensures every
+      // math table row exists before content_html is committed.
+      const puts: Promise<void>[] = [];
+      const updated = article.content_html.replace(LEGACY_RE, (_, attrs, b64) => {
+        try {
+          const svg = atob(b64);
+          const dMatch = attrs.match(/\bd="(\d)"/);
+          const wMatch = attrs.match(/\bw="([\d.]+)"/);
+          const hMatch = attrs.match(/\bh="([\d.]+)"/);
+          const display = dMatch?.[1] === '1';
+          const w = parseFloat(wMatch?.[1] ?? '1') || 1;
+          const h = parseFloat(hMatch?.[1] ?? '1') || 1;
+          // Hash SVG content (TeX unavailable here). Uses the same 64-bit djb2
+          // as mathHash so the key space matches newly-fetched articles.
+          const hash = mathHash(svg, display);
+          puts.push(putMath(hash, svg, w, h, display));
+          changed = true;
+          return `<math-i hash="${hash}" d="${display ? '1' : '0'}" w="${w.toFixed(4)}" h="${h.toFixed(4)}"></math-i>`;
+        } catch { return _; }
+      });
+      // Wait for all math rows to land before updating content_html so a
+      // concurrent article open never sees a hash with no matching DB row.
+      await Promise.all(puts.map(p => p.catch(() => {})));
+      if (changed) await updateArticleHtml(article.slug, updated);
+    } catch { }
+  }
+  await setMeta('math_hash_format_v1', '1');
+  backfillAst().catch(() => {});
 }
 
 // One-time startup backfill: run substitutemath on all already-cached math
@@ -63,6 +123,25 @@ export async function backfillMathInline(): Promise<void> {
     }
   }
   await setMeta('math_inline_v2', '1');
+  // Re-populate AST for any articles whose content_html changed during backfill.
+  backfillAst().catch(() => {});
+}
+
+// One-time startup backfill: pre-parse AST for all cached articles that don't
+// have one yet (articles cached before this feature, or updated by math backfill).
+export async function backfillAst(): Promise<void> {
+  const slugs = await getUncachedAstSlugs();
+  for (const slug of slugs) {
+    // Yield one animation frame between parses so background AST generation
+    // doesn't monopolize the JS thread and drop frames while the user is active.
+    await new Promise<void>(r => setTimeout(r, 32));
+    try {
+      const entry = await getEntry(slug);
+      if (!entry?.content_html) continue;
+      const ast = JSON.stringify(parseSepHtml(entry.content_html));
+      await setArticleAst(slug, ast);
+    } catch { }
+  }
 }
 
 const BASE = 'https://plato.stanford.edu';
@@ -184,12 +263,15 @@ export async function fetchAndCacheArticle(slug: string): Promise<boolean> {
     const hasMath = linkedHtml.includes('\\(') || linkedHtml.includes('\\[');
     // Substitute math before storing so content_html is always SVG-ready.
     const finalHtml = hasMath ? await substitutemath(linkedHtml) : linkedHtml;
+    // Pre-parse the AST so ArticleScreen can JSON.parse instead of re-parsing HTML.
+    const content_ast = JSON.stringify(parseSepHtml(finalHtml));
     await cacheArticle(slug, {
       author: extractMetaContent(html, 'citation_author') ?? extractAuthor(html),
       pub_date: extractMetaContent(html, 'citation_publication_date'),
       toc_html: tocHtml,
       preamble_html: preambleHtml,
       content_html: finalHtml,
+      content_ast,
       has_math: hasMath ? 1 : 0,
     });
     // Index outgoing links for graph view

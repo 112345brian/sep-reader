@@ -159,14 +159,20 @@ function parseInlines(nodes: DomNode[]): Inline[] {
         out.push({ t: 'text', v: '\n' });
         break;
       case 'math-i': {
-        // Pre-rendered math SVG, stored as base64 in the element's text content.
-        const b64 = textOf(n);
-        if (!b64) break;
-        const svg = atob(b64);
         const display = n.attribs?.d === '1';
         const w = parseFloat(n.attribs?.w ?? '1') || 1;
         const h = parseFloat(n.attribs?.h ?? '1') || 1;
-        out.push({ t: 'mathsvg', svg, w, h, display });
+        const hash = n.attribs?.hash;
+        if (hash) {
+          // New format: SVG stored in math table, referenced by hash.
+          out.push({ t: 'mathref', hash, w, h, display });
+        } else {
+          // Legacy format: SVG inlined as base64 in text content.
+          const b64 = textOf(n);
+          if (!b64) break;
+          const svg = atob(b64);
+          out.push({ t: 'mathsvg', svg, w, h, display });
+        }
         break;
       }
       case 'span':

@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator, InteractionManager,
+  View, Text, StyleSheet, ActivityIndicator,
   TouchableOpacity, Share, Linking, Pressable,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -14,7 +14,7 @@ import type { RouteProp } from '@react-navigation/native';
 import {
   getEntry, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
-  getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs,
+  getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs, getMathSvgMap,
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { primeBackfillForSlugs } from '../services/inpho';
@@ -23,7 +23,7 @@ import { parseSepHtml } from '../utils/sepHtml/parse';
 import { SepArticle, type SepArticleHandle } from '../utils/sepHtml/render/SepArticle';
 import { ArticleHeader } from '../utils/sepHtml/render/ArticleHeader';
 import { InlineContent } from '../utils/sepHtml/render/Inline';
-import type { Inline } from '../utils/sepHtml/types';
+import type { Inline, Block } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet from '../components/TocSheet';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
@@ -164,20 +164,71 @@ export default function ArticleScreen() {
   // Native-renderer AST — deferred past the navigation animation. SVGs are
   // already baked into content_html at fetch time, so parse is pure and fast.
   const [nativeArticle, setNativeArticle] = useState<ReturnType<typeof parseSepHtml> | null>(null);
-  const readyContentHtml = state.phase === 'ready' ? state.entry.content_html : null;
+  const [mathSvgs, setMathSvgs] = useState<Record<string, string>>({});
+  // After the AST is ready, load math SVGs from the DB in one batch query.
+  // mathref nodes show invisible placeholders until this resolves (~1 DB query).
   useEffect(() => {
-    if (!USE_NATIVE_RENDERER || state.phase !== 'ready') {
+    if (!nativeArticle) { setMathSvgs({}); return; }
+    const hashes: string[] = [];
+    function collectInlineHashes(inlines: Inline[]) {
+      for (const n of inlines) {
+        if (n.t === 'mathref') hashes.push(n.hash);
+        else if ('children' in n && Array.isArray(n.children)) collectInlineHashes(n.children as Inline[]);
+      }
+    }
+    function collectBlockHashes(blocks: Block[]) {
+      for (const block of blocks) {
+        if (block.t === 'para' || block.t === 'heading') {
+          collectInlineHashes(block.children);
+        } else if (block.t === 'blockquote') {
+          collectBlockHashes(block.children);
+        } else if (block.t === 'list') {
+          block.items.forEach(item => collectBlockHashes(item));
+        } else if (block.t === 'deflist') {
+          block.rows.forEach(row => {
+            collectInlineHashes(row.term);
+            collectBlockHashes(row.def);
+          });
+        } else if (block.t === 'table') {
+          if (block.caption) collectInlineHashes(block.caption);
+          block.rows.forEach(row => row.cells.forEach(cell => collectInlineHashes(cell)));
+        }
+      }
+    }
+    collectBlockHashes(nativeArticle.blocks);
+    if (!hashes.length) return;
+    getMathSvgMap(hashes).then(setMathSvgs).catch(() => {});
+  }, [nativeArticle]);
+
+  // Key on content strings (primitives) rather than the entry object so the
+  // parse effect only re-fires when the AST or HTML actually changes, not on
+  // every state object replacement.
+  const astKey = state.phase === 'ready'
+    ? (state.entry.content_ast ?? `html:${state.entry.slug}`)
+    : null;
+  const readyEntry = state.phase === 'ready' ? state.entry : null;
+  useEffect(() => {
+    if (!USE_NATIVE_RENDERER || !readyEntry) {
       setNativeArticle(null);
       return;
     }
-    const html = state.entry.content_html ?? '';
+    // Fast path: AST was pre-parsed at fetch time — just deserialize.
+    if (readyEntry.content_ast) {
+      try {
+        setNativeArticle(JSON.parse(readyEntry.content_ast));
+        return;
+      } catch { }
+    }
+    // Slow path: AST not yet stored (article cached before this feature).
+    // Yield once so the spinner paints before the parse blocks the JS thread.
     let cancelled = false;
-    const task = InteractionManager.runAfterInteractions(() => {
+    const html = readyEntry.content_html ?? '';
+    setTimeout(() => {
       if (!cancelled) setNativeArticle(parseSepHtml(html));
-    });
-    return () => { cancelled = true; task.cancel(); };
+    }, 0);
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.phase, readyContentHtml]);
+  }, [astKey]);
 
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
@@ -441,7 +492,24 @@ export default function ArticleScreen() {
       if (e.translationY < -25) setShowToc(true);
     });
 
+  // Swipe right from the left edge → go back. Android's native swipe-back is
+  // unreliable here (3-button nav + predictive back broken on react-native-screens),
+  // so we own it. hitSlop restricts activation to the first 20pt from the left
+  // edge; failOffsetY gives vertical scroll priority if the finger drifts up/down
+  // first; activeOffsetX([10, 9999]) only triggers on rightward movement.
+  const edgeBack = Gesture.Pan()
+    .runOnJS(true)
+    .hitSlop({ left: 0, width: 20 })
+    .activeOffsetX([10, 9999])
+    .failOffsetY([-8, 8])
+    .onEnd(e => {
+      if (e.translationX > 80 || e.velocityX > 500) {
+        nav.goBack();
+      }
+    });
+
   return (
+    <GestureDetector gesture={edgeBack}>
     <View style={styles.root}>
       {/* ── App bar (swipe down → graph) ── */}
       <GestureDetector gesture={swipeGraph}>
@@ -527,10 +595,16 @@ export default function ArticleScreen() {
                 <ActivityIndicator color="#5b8ef5" />
               </View>
             )}
+            {USE_NATIVE_RENDERER && !nativeArticle && (
+              <View style={styles.webOverlay}>
+                <ActivityIndicator color="#5b8ef5" />
+              </View>
+            )}
             {USE_NATIVE_RENDERER && nativeArticle ? (
               <SepArticle
                 ref={nativeArticleRef}
                 article={nativeArticle}
+                mathSvgs={mathSvgs}
                 header={
                   <ArticleHeader
                     title={displayTitle}
@@ -633,6 +707,7 @@ export default function ArticleScreen() {
         }}
       />
     </View>
+    </GestureDetector>
   );
 }
 

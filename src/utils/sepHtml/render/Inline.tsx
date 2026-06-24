@@ -10,6 +10,8 @@ const PX_PER_EX = SEP_BASE_FONT / 2;
 export interface InlineHandlers {
   onLinkPress?: (href: string, wl: boolean) => void;
   onFootnotePress?: (href: string, label: string) => void;
+  // hash→svg map loaded from the `math` DB table after article text renders.
+  mathSvgs?: Record<string, string>;
 }
 
 // A character range (over the paragraph's plain text, as produced by inlineText)
@@ -34,10 +36,22 @@ const codeStyle = {
 
 export function hasMath(inlines: Inline[]): boolean {
   for (const i of inlines) {
-    if (i.t === 'mathsvg') return true;
+    if (i.t === 'mathsvg' || i.t === 'mathref') return true;
     if ('children' in i && Array.isArray(i.children) && hasMath(i.children)) return true;
   }
   return false;
+}
+
+function renderMathNode(node: { t: 'mathsvg' | 'mathref'; w: number; h: number; display: boolean; svg?: string; hash?: string }, h: InlineHandlers, k: string, inline = false) {
+  const pw = Math.max(1, Math.round(node.w * PX_PER_EX));
+  const ph = Math.max(1, Math.round(node.h * PX_PER_EX));
+  const svg = node.t === 'mathsvg' ? node.svg! : (node.hash ? h.mathSvgs?.[node.hash] : undefined);
+  if (!svg) {
+    // Placeholder: reserve the right dimensions while SVGs load.
+    return <View key={k} style={{ width: pw, height: ph, opacity: 0 }} />;
+  }
+  return <SvgXml key={k} xml={svg} width={pw} height={ph} color={SEP_COLORS.text}
+    style={!inline || node.display ? undefined : { transform: [{ translateY: Math.round(ph * 0.18) }] }} />;
 }
 
 // ── Fast path: pure text/links/emphasis nest cleanly inside one <Text> ────────
@@ -83,12 +97,9 @@ function renderTextRuns(inlines: Inline[], h: InlineHandlers, key = 'i'): React.
         return <Text key={k} style={{ fontSize: sepText.body.fontSize! * 0.75 }}>{renderTextRuns(node.children, h, k)}</Text>;
       case 'code':
         return <Text key={k} style={codeStyle}>{` ${node.v} `}</Text>;
-      case 'mathsvg': {
-        const pw = Math.max(1, Math.round(node.w * PX_PER_EX));
-        const ph = Math.max(1, Math.round(node.h * PX_PER_EX));
-        return <SvgXml key={k} xml={node.svg} width={pw} height={ph} color={SEP_COLORS.text}
-          style={node.display ? undefined : { transform: [{ translateY: Math.round(ph * 0.18) }] }} />;
-      }
+      case 'mathsvg':
+      case 'mathref':
+        return renderMathNode(node, h, k, true);
       default:
         return null;
     }
@@ -189,12 +200,9 @@ function renderHighlightedRuns(
 // so the common case keeps the fast single-<Text> path.
 function flattenToTokens(inlines: Inline[], h: InlineHandlers, style: object, out: React.ReactNode[], keyRef: { n: number }) {
   for (const node of inlines) {
-    if (node.t === 'mathsvg') {
+    if (node.t === 'mathsvg' || node.t === 'mathref') {
       if (node.display) continue; // display math handled at block level
-      const w = Math.max(1, Math.round(node.w * PX_PER_EX));
-      const hh = Math.max(1, Math.round(node.h * PX_PER_EX));
-      out.push(<SvgXml key={`m${keyRef.n++}`} xml={node.svg} width={w} height={hh} color={SEP_COLORS.text}
-        style={{ transform: [{ translateY: Math.round(hh * 0.18) }] }} />);
+      out.push(renderMathNode(node, h, `m${keyRef.n++}`, true));
     } else if (node.t === 'text') {
       // split into words; spaces become natural wrap points
       for (const word of node.v.split(/(\s+)/)) {

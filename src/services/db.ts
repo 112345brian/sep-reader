@@ -113,6 +113,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     db.runAsync('ALTER TABLE entries ADD COLUMN parent_label TEXT').catch(() => {}),
     db.runAsync("ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'sep'").catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN has_math INTEGER DEFAULT 0').catch(() => {}),
+    db.runAsync('ALTER TABLE entries ADD COLUMN content_ast TEXT').catch(() => {}),
   ]);
 
   // One-time migration: clear articles cached before preamble_html column existed
@@ -179,6 +180,15 @@ export async function getMathByHashes(hashes: string[]): Promise<MathRow[]> {
   return rows.map(r => ({ hash: r.hash, svg: r.svg, w: r.w, h: r.h, d: r.d === 1 }));
 }
 
+// Return a hash→svg map for the given hashes. Missing hashes are omitted.
+export async function getMathSvgMap(hashes: string[]): Promise<Record<string, string>> {
+  if (!hashes.length) return {};
+  const rows = await getMathByHashes(hashes);
+  const map: Record<string, string> = {};
+  for (const r of rows) map[r.hash] = r.svg;
+  return map;
+}
+
 // Persist one device-rendered equation. Idempotent on hash.
 export async function putMath(
   hash: string,
@@ -189,7 +199,7 @@ export async function putMath(
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    'INSERT OR REPLACE INTO math (hash, svg, w, h, d) VALUES (?, ?, ?, ?, ?)',
+    'INSERT OR IGNORE INTO math (hash, svg, w, h, d) VALUES (?, ?, ?, ?, ?)',
     [hash, svg, w, h, display ? 1 : 0]
   );
 }
@@ -223,15 +233,30 @@ export async function getMathArticleHtml(): Promise<Array<{ slug: string; conten
   return rows;
 }
 
-// Overwrite content_html for a single entry. Used by backfillMathInline.
+// Overwrite content_html and clear AST for a single entry. Used by backfillMathInline.
+// AST is cleared so ArticleScreen falls back to parseSepHtml; backfillAst re-populates it.
 export async function updateArticleHtml(slug: string, html: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync(`UPDATE entries SET content_html = ? WHERE slug = ?`, [html, slug]);
+  await db.runAsync(`UPDATE entries SET content_html = ?, content_ast = NULL WHERE slug = ?`, [html, slug]);
+}
+
+export async function setArticleAst(slug: string, ast: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(`UPDATE entries SET content_ast = ? WHERE slug = ?`, [ast, slug]);
+}
+
+// Return slugs of cached articles that don't yet have a pre-parsed AST.
+export async function getUncachedAstSlugs(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ slug: string }>(
+    `SELECT slug FROM entries WHERE content_html IS NOT NULL AND content_ast IS NULL`
+  );
+  return rows.map(r => r.slug);
 }
 
 export async function cacheArticle(
   slug: string,
-  data: Pick<EntryRow, 'author' | 'pub_date' | 'toc_html' | 'preamble_html' | 'content_html' | 'has_math'>
+  data: Pick<EntryRow, 'author' | 'pub_date' | 'toc_html' | 'preamble_html' | 'content_html' | 'content_ast' | 'has_math'>
 ): Promise<void> {
   const db = await getDb();
   const wordCount = countWords(data.content_html ?? '');
@@ -254,11 +279,11 @@ export async function cacheArticle(
     `UPDATE entries SET
        author = ?, pub_date = ?, content_hash = ?,
        toc_html = ?, preamble_html = ?,
-       content_html = ?, has_math = ?, word_count = ?, excerpt = ?, cached_at = ?
+       content_html = ?, content_ast = ?, has_math = ?, word_count = ?, excerpt = ?, cached_at = ?
      WHERE slug = ?`,
     [data.author ?? null, data.pub_date ?? null, hash,
      data.toc_html ?? null, data.preamble_html ?? null,
-     data.content_html ?? null, data.has_math ? 1 : 0, wordCount, excerpt, now, slug]
+     data.content_html ?? null, data.content_ast ?? null, data.has_math ? 1 : 0, wordCount, excerpt, now, slug]
   );
 
   // Record the new version

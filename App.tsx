@@ -3,13 +3,13 @@ import { View, Text, StyleSheet, ActivityIndicator, LogBox } from 'react-native'
 
 LogBox.ignoreAllLogs();
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services/db';
 import { syncOnLaunch } from './src/services/dataSync';
-import { refreshIndexIfStale, downloadAll, syncCachedArticles, backfillMathInline } from './src/services/catalog';
+import { refreshIndexIfStale, downloadAll, syncCachedArticles, backfillMathInline, backfillAst, backfillMathHashFormat } from './src/services/catalog';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
@@ -34,6 +34,24 @@ export type RootStackParamList = {
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+// Android 16 forces edge-to-edge: the app draws behind the translucent status
+// and navigation bars, so scrolling content bleeds through them. These opaque
+// bars sit over the system-bar regions (pointerEvents none, so the OS still
+// owns taps/gestures) to give the bars a solid backdrop. Must live inside
+// SafeAreaProvider to read the insets.
+function SystemBarScrim() {
+  const insets = useSafeAreaInsets();
+  return (
+    <>
+      <View pointerEvents="none" style={[barStyles.bar, { top: 0, height: insets.top }]} />
+      <View pointerEvents="none" style={[barStyles.bar, { bottom: 0, height: insets.bottom }]} />
+    </>
+  );
+}
+const barStyles = StyleSheet.create({
+  bar: { position: 'absolute', left: 0, right: 0, backgroundColor: '#111', zIndex: 50 },
+});
 
 const THEME = {
   dark: true,
@@ -131,9 +149,15 @@ export default function App() {
         .then(() => setDownloadProgress(null));
     }
 
-    // One-time background backfill: substitute math SVGs into content_html
-    // for all already-cached articles that pre-date this pipeline.
-    backfillMathInline().catch(() => {});
+    // Sequential chain: MathInline must complete before HashFormat, because
+    // HashFormat expects <math-i base64> nodes that MathInline produces.
+    // HashFormat internally chains backfillAst for articles it rewrites.
+    backfillMathInline()
+      .then(() => backfillMathHashFormat())
+      .catch(() => {});
+    // Independent backfillAst for articles already on the hash pipeline
+    // (fetched after HashFormat landed) that just need AST pre-parsing.
+    backfillAst().catch(() => {});
   }
 
   async function handleOnboardingDone(prefs: Prefs) {
@@ -180,7 +204,15 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <NavigationContainer theme={THEME} ref={navRef}>
-          <Stack.Navigator id="root" screenOptions={{ headerShown: false }}>
+          <Stack.Navigator
+            id="root"
+            screenOptions={{
+              headerShown: false,
+              // Native Android swipe-back is unreliable here (3-button nav, no
+              // edge gesture); ArticleScreen implements its own edge-swipe Pan.
+              animation: 'slide_from_right',
+            }}
+          >
             <Stack.Screen name="Home" component={HomeScreen} />
             <Stack.Screen name="Article" component={ArticleScreen} />
             <Stack.Screen name="History" component={HistoryScreen} />
@@ -190,6 +222,8 @@ export default function App() {
             <Stack.Screen name="Graph" component={GraphScreen} />
           </Stack.Navigator>
         </NavigationContainer>
+        {/* Opaque backdrop behind the translucent system bars (edge-to-edge) */}
+        <SystemBarScrim />
         {/* Off-screen MathJax renderer (TeX→SVG; MathJax can't run on Hermes) */}
         <MathRenderWebView />
         {downloadProgress && (

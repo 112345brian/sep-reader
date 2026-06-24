@@ -18,7 +18,11 @@ export type Inline =
   // Pre-rendered math SVG, substituted into content_html at fetch time.
   // `display` marks block-style (centered, own line) vs inline.
   // `w` and `h` are MathJax ex-unit dimensions.
-  | { t: 'mathsvg'; svg: string; w: number; h: number; display: boolean };
+  | { t: 'mathsvg'; svg: string; w: number; h: number; display: boolean }
+  // Hash-referenced math: SVG is stored in the `math` DB table by hash and
+  // loaded lazily after the article text renders. Replaces `mathsvg` for newly
+  // fetched articles so content_html stays compact (no inlined base64 SVGs).
+  | { t: 'mathref'; hash: string; w: number; h: number; display: boolean };
 
 export interface TableRow {
   header: boolean;
