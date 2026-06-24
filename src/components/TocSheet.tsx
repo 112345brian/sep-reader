@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, Pressable, Animated,
 } from 'react-native';
@@ -25,6 +25,7 @@ const C = {
 interface Props {
   tocHtml: string | null;
   annotations: Annotation[];
+  slideAnim: Animated.Value;
   onClose: () => void;
   onTocJump: (href: string) => void;
   onAnnotationTap: (ann: Annotation) => void;
@@ -39,26 +40,23 @@ const ANN_COLORS: Record<string, string> = {
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export default function TocSheet({ tocHtml, annotations, onClose, onTocJump, onAnnotationTap }: Props) {
+export default function TocSheet({ tocHtml, annotations, slideAnim, onClose, onTocJump, onAnnotationTap }: Props) {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<'contents' | 'annotations'>('contents');
   const tocItems = tocHtml ? parseToc(tocHtml) : [];
 
-  const slideAnim = useRef(new Animated.Value(350)).current;
-  useEffect(() => {
-    Animated.spring(slideAnim, {
-      toValue: 0,
-      useNativeDriver: true,
-      damping: 28,
-      stiffness: 320,
-      mass: 0.9,
-    }).start();
-  }, []);
+  const backdropOpacity = slideAnim.interpolate({
+    inputRange: [0, 350],
+    outputRange: [0.55, 0],
+    extrapolate: 'clamp',
+  });
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {/* Scrim — tap to close */}
-      <Pressable style={styles.backdrop} onPress={onClose} />
+      {/* Scrim — tap to close, fades in as sheet rises */}
+      <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} pointerEvents="auto">
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
+      </Animated.View>
 
       {/* Bottom sheet */}
       <Animated.View style={[styles.sheet, { paddingBottom: insets.bottom, transform: [{ translateY: slideAnim }] }]}>
@@ -148,7 +146,7 @@ export default function TocSheet({ tocHtml, annotations, onClose, onTocJump, onA
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,1)',
   },
 
   sheet: {

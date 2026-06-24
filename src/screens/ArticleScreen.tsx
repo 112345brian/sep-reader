@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator, InteractionManager,
-  TouchableOpacity, Share, Linking, Pressable,
+  TouchableOpacity, Share, Linking, Pressable, Animated,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -203,6 +203,8 @@ export default function ArticleScreen() {
   const [orphaned, setOrphaned] = useState<Annotation[]>([]);
   const [orphanDismissed, setOrphanDismissed] = useState(false);
   const [showToc, setShowToc] = useState(false);
+  const TOC_SHEET_H = 350;
+  const tocSlideAnim = useRef(new Animated.Value(TOC_SHEET_H)).current;
   const [showOverflow, setShowOverflow] = useState(false);
   const [footnote, setFootnote] = useState<{ inlines: Inline[] } | null>(null);
   const [backlinkCount, setBacklinkCount] = useState(0);
@@ -534,12 +536,40 @@ export default function ArticleScreen() {
       if (e.translationY > 50) openGraph();
     });
 
+  const closeToc = useCallback(() => {
+    Animated.spring(tocSlideAnim, {
+      toValue: TOC_SHEET_H,
+      useNativeDriver: true,
+      damping: 28,
+      stiffness: 320,
+      mass: 0.9,
+    }).start(() => setShowToc(false));
+  }, [tocSlideAnim]);
+
   // Bottom handle: tap (Pressable — instant) or swipe up (Pan gesture).
   const tocSwipe = Gesture.Pan()
     .runOnJS(true)
     .activeOffsetY(-12)
+    .onStart(() => {
+      setShowToc(true);
+      tocSlideAnim.stopAnimation();
+      tocSlideAnim.setValue(TOC_SHEET_H);
+    })
+    .onUpdate(e => {
+      tocSlideAnim.setValue(Math.max(0, TOC_SHEET_H + e.translationY));
+    })
     .onEnd(e => {
-      if (e.translationY < -25) setShowToc(true);
+      if (e.translationY < -80 || e.velocityY < -500) {
+        Animated.spring(tocSlideAnim, {
+          toValue: 0,
+          useNativeDriver: true,
+          damping: 28,
+          stiffness: 320,
+          mass: 0.9,
+        }).start();
+      } else {
+        closeToc();
+      }
     });
 
   // Swipe right from the left edge → go back. Android's native swipe-back is
@@ -736,7 +766,8 @@ export default function ArticleScreen() {
             <TocSheet
               tocHtml={state.entry.toc_html}
               annotations={annotations}
-              onClose={() => setShowToc(false)}
+              slideAnim={tocSlideAnim}
+              onClose={closeToc}
               onTocJump={handleTocJump}
               onAnnotationTap={(ann) => setEditingAnnotation(ann)}
             />

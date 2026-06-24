@@ -2,6 +2,9 @@
 
 ## [0.6.0] — 2026-06-24
 
+### Changed
+- **TOC sheet follows finger on swipe-up** — the bottom sheet now tracks your finger in real time as you swipe up from the handle, instead of snapping open on release. The backdrop fades in proportionally during the drag. Releasing past 80 pt (or with a fast flick) springs the sheet fully open; releasing earlier springs it back closed.
+
 ### Added
 - **Inline table of contents** — a compact, tappable TOC appears between the preamble and the first article section, replacing the dead space left by the skipped `#toc` div. Top-level sections are full brightness; subsections are indented and muted. Tapping any entry scrolls directly to that section.
 - **App icon** — 7-ray sun on a dark rounded-square background, replaces the default RN icon.
