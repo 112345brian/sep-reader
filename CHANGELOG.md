@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **Swipe-right to go back** — gesture now reliably navigates back. Disabled the native stack's competing iOS back-swipe gesture (`gestureEnabled: false` on Article screen) and loosened the trigger condition so a moderate drag (60 px) or fast flick (300 px/s) commits, rather than requiring both simultaneously.
+
 ## [0.4.1] — 2026-06-23
 
 ### Fixed

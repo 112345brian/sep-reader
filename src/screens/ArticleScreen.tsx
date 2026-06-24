@@ -388,7 +388,7 @@ export default function ArticleScreen() {
     })
     .onEnd(e => {
       'worklet';
-      if (e.translationX > 80 && e.velocityX > 150) {
+      if (e.translationX > 60 || e.velocityX > 300) {
         // Reset immediately and let React Navigation drive the back transition.
         // Springing to 500 first leaves a blank #111 frame because the native
         // stack detaches the previous screen — nothing is rendered behind us.
