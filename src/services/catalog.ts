@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, putMathBatch } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getAllUncachedSlugs, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, putMathBatch, getMathArticleHtml } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 import { parseSepHtml } from '../utils/sepHtml/parse';
@@ -31,6 +31,21 @@ async function prerenderMath(contentHtml: string): Promise<void> {
   }
 
   await putMathBatch(toStore);
+}
+
+// One-time startup backfill: render math for all already-cached articles that
+// pre-date the prerenderMath pipeline. Runs in background, yields between
+// articles and between equation batches to stay off the critical UI path.
+// Guarded by a meta key so it only runs once per device.
+export async function backfillMathCache(): Promise<void> {
+  const done = await getMeta('math_prerender_v1');
+  if (done) return;
+  const articles = await getMathArticleHtml();
+  for (let i = 0; i < articles.length; i++) {
+    await new Promise<void>(r => setTimeout(r, 0)); // yield between articles
+    await prerenderMath(articles[i].content_html).catch(() => {});
+  }
+  await setMeta('math_prerender_v1', '1');
 }
 
 const BASE = 'https://plato.stanford.edu';

@@ -230,6 +230,16 @@ export async function upsertIndexEntries(
   });
 }
 
+// Return content_html for all cached articles with has_math=1 that still need
+// math pre-rendering. Used by the startup backfill in catalog.ts.
+export async function getMathArticleHtml(): Promise<Array<{ slug: string; content_html: string }>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ slug: string; content_html: string }>(
+    `SELECT slug, content_html FROM entries WHERE has_math = 1 AND content_html IS NOT NULL`
+  );
+  return rows;
+}
+
 export async function cacheArticle(
   slug: string,
   data: Pick<EntryRow, 'author' | 'pub_date' | 'toc_html' | 'preamble_html' | 'content_html' | 'has_math'>

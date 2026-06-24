@@ -9,7 +9,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services/db';
 import { syncOnLaunch } from './src/services/dataSync';
-import { refreshIndexIfStale, downloadAll, syncCachedArticles } from './src/services/catalog';
+import { refreshIndexIfStale, downloadAll, syncCachedArticles, backfillMathCache } from './src/services/catalog';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import TestRunnerScreen from './src/screens/TestRunnerScreen';
@@ -129,6 +129,10 @@ export default function App() {
       downloadAll(p => setDownloadProgress(p), undefined, prefs.libraryScope)
         .then(() => setDownloadProgress(null));
     }
+
+    // One-time background backfill: pre-render math for all already-cached
+    // articles that pre-date the fetch-time prerenderMath pipeline.
+    backfillMathCache().catch(() => {});
   }
 
   async function handleOnboardingDone(prefs: Prefs) {
