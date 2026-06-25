@@ -114,17 +114,23 @@ export default function App() {
     // Fetch the priority article in the background so it's readable during loading.
     // Only for SEP-scoped libraries; skip for OWL-only users (neoplatonism is SEP content).
     // Check the cache first — if already present, skip the network round-trip.
+    // Guard against OWL slugs appearing in recent history when user is in SEP-only mode.
     if (prefs.libraryScope !== 'owl') {
-      getRecentSlugs(1).then(recent => {
-        const slug = recent[0]?.slug ?? FALLBACK_ARTICLE_SLUG;
-        return getEntry(slug)
-          .then(existing => {
-            if (existing?.content_html) { setPriorityArticle(existing); return; }
-            return fetchAndCacheArticle(slug)
-              .then(() => getEntry(slug))
-              .then(entry => { if (entry) setPriorityArticle(entry); });
-          });
-      }).catch(() => {});
+      (async () => {
+        const recent = await getRecentSlugs(1);
+        let slug = recent[0]?.slug ?? FALLBACK_ARTICLE_SLUG;
+        if (prefs.libraryScope === 'sep' && recent[0]) {
+          const sourceCheck = await getEntry(slug);
+          if (sourceCheck?.source === 'owl') slug = FALLBACK_ARTICLE_SLUG;
+        }
+        const existing = await getEntry(slug);
+        if (existing?.content_html) { setPriorityArticle(existing); return; }
+        const ok = await fetchAndCacheArticle(slug);
+        if (ok) {
+          const entry = await getEntry(slug);
+          if (entry) setPriorityArticle(entry);
+        }
+      })().catch(() => {});
     }
 
     const count = await getEntryCount();
@@ -166,30 +172,31 @@ export default function App() {
 
     setPhase('ready');
 
-    // After nav is ready, handle "continue" mode
+    // Everything after this is fire-and-forget — errors must NOT propagate up to
+    // boot().catch(), which would snap the phase from 'ready' back to 'index_error'.
     if (prefs.homeMode === 'continue') {
-      const recent = await getRecentSlugs(1);
-      if (recent.length > 0) {
-        setTimeout(() => {
-          navRef.current?.navigate('Article', {
-            slug: recent[0].slug,
-            title: recent[0].title,
-          });
-        }, 100);
-      }
+      getRecentSlugs(1).then(recent => {
+        if (recent.length > 0) {
+          setTimeout(() => {
+            navRef.current?.navigate('Article', {
+              slug: recent[0].slug,
+              title: recent[0].title,
+            });
+          }, 100);
+        }
+      }).catch(() => {});
     }
 
-    // Auto-sync runs after ready — it updates articles already in the DB and
-    // doesn't need to block the user.
-    const autoSync = await getMeta('auto_sync');
-    const lastDeepSync = await getMeta('last_deep_sync');
-    if (autoSync && autoSync !== 'off') {
-      const days = autoSync === '2days' ? 2 : 7;
-      const elapsed = Date.now() - (lastDeepSync ? Number(lastDeepSync) : 0);
-      if (elapsed > days * 24 * 60 * 60 * 1000) {
-        syncCachedArticles(() => {}).catch(() => {});
+    // Auto-sync updates already-cached articles; doesn't need to block the user.
+    Promise.all([getMeta('auto_sync'), getMeta('last_deep_sync')]).then(([autoSync, lastDeepSync]) => {
+      if (autoSync && autoSync !== 'off') {
+        const days = autoSync === '2days' ? 2 : 7;
+        const elapsed = Date.now() - (lastDeepSync ? Number(lastDeepSync) : 0);
+        if (elapsed > days * 24 * 60 * 60 * 1000) {
+          syncCachedArticles(() => {}).catch(() => {});
+        }
       }
-    }
+    }).catch(() => {});
   }
 
   async function handleOnboardingDone(prefs: Prefs) {
@@ -204,7 +211,11 @@ export default function App() {
       setSeedPhase(null);
     }
     setPhase('indexing');
-    await initialize(prefs);
+    try {
+      await initialize(prefs);
+    } catch {
+      setPhase('index_error');
+    }
   }
 
   // Always mounted so the math backfill can use it during boot.

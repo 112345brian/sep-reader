@@ -579,6 +579,14 @@ export async function clearArticleCache(): Promise<void> {
   await db.runAsync(
     'UPDATE entries SET content_html = NULL, toc_html = NULL, preamble_html = NULL, cached_at = NULL'
   );
+  // Clear backfill flags so they re-run against the fresh downloads on next launch.
+  // Without this, articles re-downloaded with skipMath:true would be permanently
+  // stored with raw TeX because backfillMathInline sees the flag and returns early.
+  await db.runAsync(
+    "DELETE FROM meta WHERE key IN ('math_inline_v2', 'math_hash_format_v1')"
+  );
+  metaCache.delete('math_inline_v2');
+  metaCache.delete('math_hash_format_v1');
 }
 
 export async function getSlugsByCacheStatus(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{

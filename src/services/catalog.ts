@@ -99,7 +99,6 @@ export async function backfillMathHashFormat(): Promise<void> {
     } catch { }
   }
   await setMeta('math_hash_format_v1', '1');
-  backfillAst().catch(() => {});
 }
 
 // One-time startup backfill: run substitutemath on all already-cached math
@@ -123,8 +122,6 @@ export async function backfillMathInline(): Promise<void> {
     }
   }
   await setMeta('math_inline_v2', '1');
-  // Re-populate AST for any articles whose content_html changed during backfill.
-  backfillAst().catch(() => {});
 }
 
 // One-time startup backfill: pre-parse AST for all cached articles that don't

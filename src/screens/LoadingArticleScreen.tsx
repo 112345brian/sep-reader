@@ -25,6 +25,18 @@ type ListItem =
   | { kind: 'spinner' };
 
 
+// Memoized so FlatList block items don't re-render on every download-progress tick.
+// h is stabilized via useMemo in Inner; block objects are stable from the data memo.
+const BlockItem = React.memo(function BlockItem({
+  block, idx, h,
+}: {
+  block: Block;
+  idx: number;
+  h: { mathSvgs: Record<string, string> };
+}) {
+  return <BlockView block={block} h={h} suppressTopBorder={idx === 0} />;
+});
+
 function LoadingBar({ phase, downloadProgress }: Pick<Props, 'phase' | 'downloadProgress'>) {
   return (
     <View style={s.bar}>
@@ -51,6 +63,16 @@ function Inner({ phase, downloadProgress, article }: Props) {
   const { height: screenHeight } = useWindowDimensions();
   const [parsed, setParsed] = useState<ReturnType<typeof parseSepHtml> | null>(null);
   const [mathSvgs, setMathSvgs] = useState<Record<string, string>>({});
+
+  // Hold frequently-changing bar values in refs so renderItem stays stable.
+  // extraData on FlatList triggers the bar item to re-render; renderItem reads
+  // fresh values from refs at that point rather than closing over stale state.
+  const livePhase = useRef(phase);
+  const liveProgress = useRef(downloadProgress);
+  const liveArticle = useRef(article);
+  livePhase.current = phase;
+  liveProgress.current = downloadProgress;
+  liveArticle.current = article;
 
   // Drives hint fade-out and arrow bounce — both on native thread.
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -114,16 +136,22 @@ function Inner({ phase, downloadProgress, article }: Props) {
     </View>
   ), [screenHeight, top]);
 
+  // Stable h object — BlockItem bails via React.memo when mathSvgs hasn't changed.
+  const h = useMemo(() => ({ mathSvgs }), [mathSvgs]);
+
+  // renderItem only re-creates when h (i.e. mathSvgs) changes. Bar state is read
+  // from refs above; FlatList's extraData drives bar re-renders.
   const renderItem = useCallback(({ item }: { item: ListItem }) => {
     if (item.kind === 'bar') {
+      const a = liveArticle.current;
       return (
         <>
-          <LoadingBar phase={phase} downloadProgress={downloadProgress} />
-          {article && (
+          <LoadingBar phase={livePhase.current} downloadProgress={liveProgress.current} />
+          {a && (
             <ArticleHeader
-              title={article.title}
-              parentLabel={article.parent_label}
-              preambleHtml={article.preamble_html}
+              title={a.title}
+              parentLabel={a.parent_label}
+              preambleHtml={a.preamble_html}
             />
           )}
         </>
@@ -136,14 +164,8 @@ function Inner({ phase, downloadProgress, article }: Props) {
         </View>
       );
     }
-    return (
-      <BlockView
-        block={item.block}
-        h={{ mathSvgs }}
-        suppressTopBorder={item.idx === 0}
-      />
-    );
-  }, [phase, downloadProgress, article, mathSvgs]);
+    return <BlockItem block={item.block} idx={item.idx} h={h} />;
+  }, [h]);
 
   return (
     <View style={{ flex: 1, backgroundColor: SEP_COLORS.bg }}>
@@ -153,6 +175,7 @@ function Inner({ phase, downloadProgress, article }: Props) {
         keyExtractor={(_, i) => String(i)}
         stickyHeaderIndices={[0]}
         ListHeaderComponent={listHeader}
+        extraData={{ phase, downloadProgress, article }}
         style={{ backgroundColor: SEP_COLORS.bg }}
         contentContainerStyle={{
           paddingHorizontal: SEP_SIDE_PAD,

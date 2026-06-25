@@ -2,6 +2,7 @@ export interface EntryRow {
   slug: string;
   title: string;
   parent_label: string | null;
+  source: string;
   author: string | null;
   pub_date: string | null;
   content_hash: string | null;
