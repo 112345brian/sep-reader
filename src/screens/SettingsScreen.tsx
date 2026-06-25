@@ -8,8 +8,9 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
-  getPrefs, savePrefs, getEntryCount, getMeta, setMeta, getAllUncachedSlugs,
+  getPrefs, savePrefs, getMeta, setMeta,
   clearArticleCache, getZoteroPrefs, saveZoteroPrefs, getSyncFolder, setSyncFolder,
+  getEntryCounts,
 } from '../services/db';
 import type { Prefs } from '../services/db';
 import { downloadAll, syncCachedArticles } from '../services/catalog';
@@ -53,10 +54,9 @@ export default function SettingsScreen() {
   }, []));
 
   async function loadCounts() {
-    const total = await getEntryCount();
+    const { total, cached } = await getEntryCounts();
     setTotalCount(total);
-    const uncached = await getAllUncachedSlugs();
-    setCachedCount(total - uncached.length);
+    setCachedCount(cached);
   }
 
   async function updatePref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
@@ -198,7 +198,6 @@ export default function SettingsScreen() {
   }
 
   return (
-    <GestureDetector gesture={swipeBack}>
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <TouchableOpacity
@@ -212,6 +211,7 @@ export default function SettingsScreen() {
         <View style={styles.back} />
       </View>
 
+      <GestureDetector gesture={swipeBack}>
       <ScrollView
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
         keyboardShouldPersistTaps="handled"
@@ -404,10 +404,10 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </Section>
 
-        <Text style={styles.version}>Nous · v0.6.2</Text>
+        <Text style={styles.version}>Nous · v0.6.6</Text>
       </ScrollView>
+      </GestureDetector>
     </View>
-    </GestureDetector>
   );
 }
 

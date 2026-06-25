@@ -17,7 +17,7 @@ import {
   getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs, getMathSvgMap,
 } from '../services/db';
 import { fetchAndCacheArticle } from '../services/catalog';
-import { primeBackfillForSlugs } from '../services/inpho';
+import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
 import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';
@@ -312,6 +312,7 @@ export default function ArticleScreen() {
       getRecentSlugs(10).then(recent => {
         const rest = recent.map(r => r.slug).filter(s => s !== slug);
         primeBackfillForSlugs([slug, ...rest]);
+        primeGraphLayouts([slug, ...rest]);
       }).catch(() => {});
     });
     const [customCss, fontSizeStr] = await Promise.all([

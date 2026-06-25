@@ -10,17 +10,19 @@
 
 import type * as SQLite from 'expo-sqlite';
 import { getDb } from './db';
+import { getInfluenceWeight } from '../data/influenceWeights';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface GraphNode {
   slug: string; title: string; read: boolean;
+  readProgress?: number; // 0–1; ≥ 0.9 = fully read, > 0 = in progress, 0/absent = unvisited
   // 'entry' = the centred article; 'idea'/'thinker' = InPhO nodes;
   // 'linked' = a neighbouring entry in the SEP hyperlink graph.
   kind?: 'entry' | 'idea' | 'thinker' | 'linked';
   birthYear?: number | null; deathYear?: number | null; // Timeline view
 }
-export interface GraphEdge { from_slug: string; to_slug: string; }
+export interface GraphEdge { from_slug: string; to_slug: string; weight?: number; }
 export interface GraphData { nodes: GraphNode[]; edges: GraphEdge[]; }
 
 export interface InphoNodeRow {
@@ -64,6 +66,18 @@ async function ensureGraphSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       payload    TEXT NOT NULL,
       fetched_at INTEGER NOT NULL
     );
+
+    -- Settled force-layout positions, keyed by article+mode+node-set hash.
+    -- positions = JSON [{slug, xRel, yRel}] where xRel/yRel are 0-1 fractions
+    -- of canvas dimensions so the cache survives screen rotation / device changes.
+    CREATE TABLE IF NOT EXISTS graph_layout_cache (
+      center_slug  TEXT NOT NULL,
+      mode         TEXT NOT NULL,
+      layout_key   INTEGER NOT NULL,
+      positions    TEXT NOT NULL,
+      created_at   INTEGER NOT NULL,
+      PRIMARY KEY (center_slug, mode)
+    );
   `);
   // Upgrade indexes created before the date columns existed (idempotent).
   await Promise.all([
@@ -96,18 +110,23 @@ export async function getGraphData(): Promise<GraphData> {
   const allSlugs = new Set<string>();
   for (const e of edges) { allSlugs.add(e.from_slug); allSlugs.add(e.to_slug); }
 
-  const readRows = await db.getAllAsync<{slug: string}>('SELECT DISTINCT slug FROM reads');
-  const readSet = new Set(readRows.map(r => r.slug));
-
   const slugList = Array.from(allSlugs);
-  const titleRows = await db.getAllAsync<{slug: string; title: string}>(
-    `SELECT slug, title FROM entries WHERE slug IN (${slugList.map(() => '?').join(',')})`,
-    slugList
-  );
-  const titleMap = new Map(titleRows.map(r => [r.slug, r.title]));
+  const [readRows, entryRows] = await Promise.all([
+    db.getAllAsync<{ slug: string }>('SELECT DISTINCT slug FROM reads'),
+    db.getAllAsync<{ slug: string; title: string; read_progress: number }>(
+      `SELECT slug, title, read_progress FROM entries WHERE slug IN (${slugList.map(() => '?').join(',')})`,
+      slugList
+    ),
+  ]);
+  const readSet = new Set(readRows.map(r => r.slug));
+  const titleMap = new Map(entryRows.map(r => [r.slug, r.title]));
+  const progressMap = new Map(entryRows.map(r => [r.slug, r.read_progress ?? 0]));
 
   return {
-    nodes: slugList.map(slug => ({ slug, title: titleMap.get(slug) ?? slug, read: readSet.has(slug) })),
+    nodes: slugList.map(slug => ({
+      slug, title: titleMap.get(slug) ?? slug, read: readSet.has(slug),
+      readProgress: progressMap.get(slug) ?? 0,
+    })),
     edges,
   };
 }
@@ -131,21 +150,22 @@ export async function getArticleLinkGraph(centerSlug: string): Promise<GraphData
   const allSlugs = new Set<string>([centerSlug]);
   for (const e of edges) { allSlugs.add(e.from_slug); allSlugs.add(e.to_slug); }
 
-  const readRows = await db.getAllAsync<{slug: string}>('SELECT DISTINCT slug FROM reads');
-  const readSet = new Set(readRows.map(r => r.slug));
-
   const slugList = Array.from(allSlugs);
-  const titleRows = await db.getAllAsync<{slug: string; title: string}>(
-    `SELECT slug, title FROM entries WHERE slug IN (${slugList.map(() => '?').join(',')})`,
-    slugList
-  );
-  const titleMap = new Map(titleRows.map(r => [r.slug, r.title]));
+  const [readRows, entryRows] = await Promise.all([
+    db.getAllAsync<{ slug: string }>('SELECT DISTINCT slug FROM reads'),
+    db.getAllAsync<{ slug: string; title: string; read_progress: number }>(
+      `SELECT slug, title, read_progress FROM entries WHERE slug IN (${slugList.map(() => '?').join(',')})`,
+      slugList
+    ),
+  ]);
+  const readSet = new Set(readRows.map(r => r.slug));
+  const titleMap = new Map(entryRows.map(r => [r.slug, r.title]));
+  const progressMap = new Map(entryRows.map(r => [r.slug, r.read_progress ?? 0]));
 
   return {
     nodes: slugList.map(slug => ({
-      slug,
-      title: titleMap.get(slug) ?? slug,
-      read: readSet.has(slug),
+      slug, title: titleMap.get(slug) ?? slug, read: readSet.has(slug),
+      readProgress: progressMap.get(slug) ?? 0,
       kind: (slug === centerSlug ? 'entry' : 'linked') as 'entry' | 'linked',
     })),
     edges,
@@ -304,11 +324,22 @@ async function resolveCorpusNodes(
   return [...bySlug.values()].map(r => ({ row: r, title: titleMap.get(r.sep_dir as string) as string }));
 }
 
-async function readSetAndTitle(centerSlug: string): Promise<{ readSet: Set<string>; centerTitle: string }> {
+async function readSetAndTitle(centerSlug: string): Promise<{
+  readSet: Set<string>; progressMap: Map<string, number>; centerTitle: string;
+}> {
   const db = await gdb();
-  const readRows = await db.getAllAsync<{ slug: string }>('SELECT DISTINCT slug FROM reads');
-  const t = await db.getFirstAsync<{ title: string }>('SELECT title FROM entries WHERE slug = ?', [centerSlug]);
-  return { readSet: new Set(readRows.map(r => r.slug)), centerTitle: t?.title ?? centerSlug };
+  const [readRows, progressRows, t] = await Promise.all([
+    db.getAllAsync<{ slug: string }>('SELECT DISTINCT slug FROM reads'),
+    db.getAllAsync<{ slug: string; read_progress: number }>(
+      'SELECT slug, read_progress FROM entries WHERE read_progress > 0'
+    ),
+    db.getFirstAsync<{ title: string }>('SELECT title FROM entries WHERE slug = ?', [centerSlug]),
+  ]);
+  return {
+    readSet: new Set(readRows.map(r => r.slug)),
+    progressMap: new Map(progressRows.map(r => [r.slug, r.read_progress])),
+    centerTitle: t?.title ?? centerSlug,
+  };
 }
 
 /** Influence DAG: directional teacher/student/influence edges among thinkers. */
@@ -316,18 +347,36 @@ export async function buildInfluenceGraph(centerSlug: string, infl: InphoInfluen
   const ids = [...new Set([...infl.teachers, ...infl.students, ...infl.influenced, ...infl.influenced_by])];
   const resolved = await resolveCorpusNodes([], ids, centerSlug);
   if (resolved.length === 0) return { nodes: [], edges: [] };
-  const { readSet, centerTitle } = await readSetAndTitle(centerSlug);
+  const { readSet, progressMap, centerTitle } = await readSetAndTitle(centerSlug);
   const idToSlug = new Map(resolved.map(r => [r.row.id, r.row.sep_dir as string]));
 
   const nodes: GraphNode[] = [
-    { slug: centerSlug, title: centerTitle, read: readSet.has(centerSlug), kind: 'entry' },
-    ...resolved.map(r => ({ slug: r.row.sep_dir as string, title: r.title, read: readSet.has(r.row.sep_dir as string), kind: 'thinker' as const })),
+    { slug: centerSlug, title: centerTitle, read: readSet.has(centerSlug), readProgress: progressMap.get(centerSlug) ?? 0, kind: 'entry' },
+    ...resolved.map(r => {
+      const s = r.row.sep_dir as string;
+      return { slug: s, title: r.title, read: readSet.has(s), readProgress: progressMap.get(s) ?? 0, kind: 'thinker' as const };
+    }),
   ];
+
   // Edge direction = influence flow (earlier → later). Teachers/influenced_by point INTO center.
+  // Base weights: direct pedagogical links (teacher/student) outweigh general influence.
+  // Wikidata weights multiply on top when available.
   const edges: GraphEdge[] = [];
-  const add = (from: string, to: string) => { if (from && to && from !== to) edges.push({ from_slug: from, to_slug: to }); };
-  for (const id of [...infl.teachers, ...infl.influenced_by]) { const s = idToSlug.get(id); if (s) add(s, centerSlug); }
-  for (const id of [...infl.students, ...infl.influenced]) { const s = idToSlug.get(id); if (s) add(centerSlug, s); }
+  const teacherSet = new Set(infl.teachers);
+  const studentSet = new Set(infl.students);
+  const add = (from: string, to: string, base: number) => {
+    if (!from || !to || from === to) return;
+    const w = base * getInfluenceWeight(from, to);
+    edges.push({ from_slug: from, to_slug: to, weight: w });
+  };
+  for (const id of [...infl.teachers, ...infl.influenced_by]) {
+    const s = idToSlug.get(id);
+    if (s) add(s, centerSlug, teacherSet.has(id) ? 3.0 : 1.5);
+  }
+  for (const id of [...infl.students, ...infl.influenced]) {
+    const s = idToSlug.get(id);
+    if (s) add(centerSlug, s, studentSet.has(id) ? 3.0 : 1.5);
+  }
   return { nodes, edges };
 }
 
@@ -336,7 +385,7 @@ export async function buildTimelineGraph(centerSlug: string, thinkerIds: number[
   const resolved = await resolveCorpusNodes([], thinkerIds, centerSlug);
   if (resolved.length === 0) return { nodes: [], edges: [] };
   const db = await gdb();
-  const { readSet, centerTitle } = await readSetAndTitle(centerSlug);
+  const { readSet, progressMap, centerTitle } = await readSetAndTitle(centerSlug);
   // Look up the center entry's own dates — if it's a thinker, it belongs on the timeline too.
   const centerDates = await db.getFirstAsync<{ birth_year: number | null; death_year: number | null }>(
     `SELECT birth_year, death_year FROM inpho_nodes WHERE sep_dir = ? AND kind = 'thinker' LIMIT 1`,
@@ -344,13 +393,17 @@ export async function buildTimelineGraph(centerSlug: string, thinkerIds: number[
   );
   const nodes: GraphNode[] = [
     {
-      slug: centerSlug, title: centerTitle, read: readSet.has(centerSlug), kind: 'entry',
+      slug: centerSlug, title: centerTitle, read: readSet.has(centerSlug),
+      readProgress: progressMap.get(centerSlug) ?? 0, kind: 'entry',
       birthYear: centerDates?.birth_year ?? null, deathYear: centerDates?.death_year ?? null,
     },
-    ...resolved.map(r => ({
-      slug: r.row.sep_dir as string, title: r.title, read: readSet.has(r.row.sep_dir as string),
-      kind: 'thinker' as const, birthYear: r.row.birth_year ?? null, deathYear: r.row.death_year ?? null,
-    })),
+    ...resolved.map(r => {
+      const s = r.row.sep_dir as string;
+      return {
+        slug: s, title: r.title, read: readSet.has(s), readProgress: progressMap.get(s) ?? 0,
+        kind: 'thinker' as const, birthYear: r.row.birth_year ?? null, deathYear: r.row.death_year ?? null,
+      };
+    }),
   ];
   const edges: GraphEdge[] = resolved.map(r => ({ from_slug: centerSlug, to_slug: r.row.sep_dir as string }));
   return { nodes, edges };
@@ -368,16 +421,54 @@ export async function buildSemanticGraph(
 ): Promise<GraphData> {
   const resolved = await resolveCorpusNodes(ideaIds, thinkerIds, centerSlug);
   if (resolved.length === 0) return { nodes: [], edges: [] };
-  const { readSet, centerTitle } = await readSetAndTitle(centerSlug);
+  const { readSet, progressMap, centerTitle } = await readSetAndTitle(centerSlug);
   const nodes: GraphNode[] = [
-    { slug: centerSlug, title: centerTitle, read: readSet.has(centerSlug), kind: 'entry' },
-    ...resolved.map(r => ({
-      slug: r.row.sep_dir as string,
-      title: r.title,
-      read: readSet.has(r.row.sep_dir as string),
-      kind: r.row.kind,
-    })),
+    { slug: centerSlug, title: centerTitle, read: readSet.has(centerSlug), readProgress: progressMap.get(centerSlug) ?? 0, kind: 'entry' },
+    ...resolved.map(r => {
+      const s = r.row.sep_dir as string;
+      return { slug: s, title: r.title, read: readSet.has(s), readProgress: progressMap.get(s) ?? 0, kind: r.row.kind };
+    }),
   ];
   const edges: GraphEdge[] = resolved.map(r => ({ from_slug: centerSlug, to_slug: r.row.sep_dir as string }));
   return { nodes, edges };
+}
+
+// ── Layout cache ──────────────────────────────────────────────────────────────
+
+export interface CachedPosition { slug: string; xRel: number; yRel: number; }
+
+// FNV-1a over sorted node slugs — cheap, good enough for cache invalidation.
+function layoutKey(nodeSlugs: string[]): number {
+  const s = [...nodeSlugs].sort().join('|');
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (Math.imul(h, 0x01000193) >>> 0);
+  }
+  return h;
+}
+
+export async function getLayoutCache(
+  centerSlug: string, mode: string, nodeSlugs: string[],
+): Promise<CachedPosition[] | null> {
+  const db = await gdb();
+  const key = layoutKey(nodeSlugs);
+  const row = await db.getFirstAsync<{ layout_key: number; positions: string }>(
+    'SELECT layout_key, positions FROM graph_layout_cache WHERE center_slug = ? AND mode = ?',
+    [centerSlug, mode]
+  );
+  if (!row || row.layout_key !== key) return null;
+  try { return JSON.parse(row.positions) as CachedPosition[]; } catch { return null; }
+}
+
+export async function setLayoutCache(
+  centerSlug: string, mode: string, nodeSlugs: string[], positions: CachedPosition[],
+): Promise<void> {
+  const db = await gdb();
+  const key = layoutKey(nodeSlugs);
+  await db.runAsync(
+    `INSERT OR REPLACE INTO graph_layout_cache (center_slug, mode, layout_key, positions, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [centerSlug, mode, key, JSON.stringify(positions), Date.now()]
+  );
 }

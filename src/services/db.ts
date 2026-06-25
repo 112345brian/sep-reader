@@ -166,6 +166,15 @@ export async function getEntryCount(): Promise<number> {
   return row?.count ?? 0;
 }
 
+export async function getEntryCounts(scope: 'all' | 'sep' | 'owl' = 'all'): Promise<{ total: number; cached: number }> {
+  const db = await getDb();
+  const where = scope === 'all' ? '' : `WHERE source = '${scope}'`;
+  const row = await db.getFirstAsync<{ total: number; cached: number }>(
+    `SELECT COUNT(*) AS total, COUNT(cached_at) AS cached FROM entries ${where}`
+  );
+  return { total: row?.total ?? 0, cached: row?.cached ?? 0 };
+}
+
 // ── Client-rendered math cache (see src/utils/sepHtml/render/mathStore.ts) ──
 
 export interface MathRow {

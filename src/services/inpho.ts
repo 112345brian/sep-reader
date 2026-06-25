@@ -19,9 +19,11 @@ import {
   inphoIndexCount, replaceInphoIndex, getInphoNodeBySep,
   getCachedInphoRelations, cacheInphoRelations, buildSemanticGraph,
   buildInfluenceGraph, buildTimelineGraph, getThinkersMissingDates, setInphoDates,
-  getCachedThinkerIdsForSlugs,
+  getCachedThinkerIdsForSlugs, getLayoutCache, setLayoutCache, getArticleLinkGraph,
   type InphoNodeRow, type GraphData, type GraphMode, type InphoRelations,
+  type CachedPosition,
 } from './graphDb';
+import { forceLayout, slugSeed } from '../utils/forceLayout';
 
 const INPHO_BASE = 'https://www.inphoproject.org';
 const HEADERS = { 'User-Agent': 'Nous/0.3 (SEP reader; +https://github.com/112345brian/sep-reader)' };
@@ -222,5 +224,71 @@ export async function primeBackfillForSlugs(slugs: string[]): Promise<void> {
     if (thinkerIds.length > 0) await backfillDates(thinkerIds);
   } catch {
     // Best-effort — never let this surface as an error to the caller.
+  }
+}
+
+// Reference canvas size for background layout computation. Positions are stored
+// as relative (xRel, yRel) so they scale correctly to any actual device dimensions.
+const PRIME_W = 390;
+const PRIME_H = 760;
+
+async function runAndCacheLayout(
+  centerSlug: string, mode: string, data: GraphData,
+): Promise<void> {
+  if (data.nodes.length === 0) return;
+  const nodeSlugs = data.nodes.map(n => n.slug);
+  const existing = await getLayoutCache(centerSlug, mode, nodeSlugs);
+  if (existing) return;
+
+  const gen = forceLayout(data.nodes, data.edges, PRIME_W, PRIME_H, centerSlug, slugSeed(centerSlug + mode));
+  let last: CachedPosition[] | null = null;
+  for (const frame of gen) {
+    last = frame.map(ln => ({ slug: ln.slug, xRel: ln.x / PRIME_W, yRel: ln.y / PRIME_H }));
+    await new Promise<void>(r => setTimeout(r, 0));
+  }
+  if (last) await setLayoutCache(centerSlug, mode, nodeSlugs, last);
+}
+
+// Session-level set so repeated article opens don't re-queue already-processed slugs.
+const _primedSlugs = new Set<string>();
+
+/**
+ * Proactively compute and cache graph layouts for the given slugs in the
+ * background, using only already-cached InPhO data (no new network requests).
+ * Safe to call fire-and-forget from ArticleScreen.
+ */
+export async function primeGraphLayouts(slugs: string[]): Promise<void> {
+  const todo = slugs.filter(s => !_primedSlugs.has(s));
+  if (todo.length === 0) return;
+  todo.forEach(s => _primedSlugs.add(s));
+  try {
+    await ensureInphoIndex();
+    for (const slug of todo) {
+      // Links view — always available, no InPhO required.
+      const linkData = await getArticleLinkGraph(slug);
+      await runAndCacheLayout(slug, 'links', linkData);
+
+      // InPhO views — only if relations are already cached for this slug.
+      const node = await getInphoNodeBySep(slug);
+      if (!node) continue;
+      const rel = await getCachedInphoRelations(slug);
+      if (!rel) continue;
+
+      await runAndCacheLayout(slug, 'related', await buildSemanticGraph(slug, rel.ideas, rel.thinkers));
+
+      if (rel.influence) {
+        await runAndCacheLayout(slug, 'influence', await buildInfluenceGraph(slug, rel.influence));
+      }
+
+      // Timeline — only if all thinker dates are already in the DB (no network needed).
+      if (rel.thinkers.length > 0) {
+        const missing = await getThinkersMissingDates(rel.thinkers);
+        if (missing.length === 0) {
+          await runAndCacheLayout(slug, 'timeline', await buildTimelineGraph(slug, rel.thinkers));
+        }
+      }
+    }
+  } catch {
+    // Best-effort.
   }
 }

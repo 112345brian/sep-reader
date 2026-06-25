@@ -11,110 +11,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { getEntryPreview } from '../services/db';
-import { getArticleLinkGraph } from '../services/graphDb';
-import type { GraphNode, GraphEdge, GraphData, GraphView } from '../services/graphDb';
+import { getEntryPreview, getMeta, setMeta } from '../services/db';
+import { getArticleLinkGraph, getLayoutCache, setLayoutCache } from '../services/graphDb';
+import type { GraphNode, GraphEdge, GraphData, GraphView, CachedPosition } from '../services/graphDb';
+import { forceLayout, slugSeed } from '../utils/forceLayout';
+import type { LayoutNode } from '../utils/forceLayout';
 import { getGraph } from '../services/inpho';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = RouteProp<RootStackParamList, 'Graph'>;
 
-interface LayoutNode extends GraphNode {
-  x: number;
-  y: number;
-}
 
-// Seeded PRNG (xorshift-derived) so the same article+mode always produces the
-// same initial scatter, keeping the layout stable across mode switches/rotations.
-function seededRand(seed: number): () => number {
-  let s = (seed >>> 0) || 1;
-  return () => {
-    s = Math.imul(s ^ (s >>> 15), s | 1) >>> 0;
-    s = (s ^ (s + (Math.imul(s ^ (s >>> 7), s | 61) >>> 0))) >>> 0;
-    return (s ^ (s >>> 14)) / 0xffffffff;
-  };
-}
-
-function slugSeed(str: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193) >>> 0;
-  return h;
-}
-
-function forceLayout(
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  width: number,
-  height: number,
-  centerSlug?: string,
-  seed = 0,
-): LayoutNode[] {
-  const W = width / 2, H = height / 2;
-  const n = nodes.length;
-  const k = Math.sqrt((width * height) / Math.max(n, 1)) * 0.8;
-  const rand = seededRand(seed);
-
-  const layout: LayoutNode[] = nodes.map(node => ({
-    ...node,
-    x: node.slug === centerSlug ? W : W + (rand() - 0.5) * width * 0.7,
-    y: node.slug === centerSlug ? H : H + (rand() - 0.5) * height * 0.7,
-  }));
-
-  const slugIndex = new Map(layout.map((n, i) => [n.slug, i]));
-
-  const iterations = Math.min(120, 60 + n);
-  for (let iter = 0; iter < iterations; iter++) {
-    const fx = new Float32Array(n);
-    const fy = new Float32Array(n);
-    const temp = Math.max(5, (1 - iter / iterations) * 80);
-
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const dx = layout[i].x - layout[j].x || 0.1;
-        const dy = layout[i].y - layout[j].y || 0.1;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const force = (k * k) / dist;
-        const fx_ = (dx / dist) * force;
-        const fy_ = (dy / dist) * force;
-        fx[i] += fx_; fy[i] += fy_;
-        fx[j] -= fx_; fy[j] -= fy_;
-      }
-    }
-
-    for (const edge of edges) {
-      const ai = slugIndex.get(edge.from_slug);
-      const bi = slugIndex.get(edge.to_slug);
-      if (ai == null || bi == null) continue;
-      const dx = layout[bi].x - layout[ai].x;
-      const dy = layout[bi].y - layout[ai].y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      const force = (dist * dist) / k;
-      const fx_ = (dx / dist) * force;
-      const fy_ = (dy / dist) * force;
-      fx[ai] += fx_; fy[ai] += fy_;
-      fx[bi] -= fx_; fy[bi] -= fy_;
-    }
-
-    for (let i = 0; i < n; i++) {
-      if (layout[i].slug === centerSlug) continue;
-      fx[i] += (W - layout[i].x) * 0.01;
-      fy[i] += (H - layout[i].y) * 0.01;
-    }
-
-    for (let i = 0; i < n; i++) {
-      if (layout[i].slug === centerSlug) continue;
-      const dist = Math.sqrt(fx[i] * fx[i] + fy[i] * fy[i]) || 1;
-      const clamped = Math.min(dist, temp);
-      layout[i].x += (fx[i] / dist) * clamped;
-      layout[i].y += (fy[i] / dist) * clamped;
-      layout[i].x = Math.max(60, Math.min(width - 60, layout[i].x));
-      layout[i].y = Math.max(40, Math.min(height - 40, layout[i].y));
-    }
-  }
-
-  return layout;
-}
 
 // Vertical timeline: newest at top (small y), oldest at bottom (large y).
 // Nodes default to center x and jitter left/right only when crowded.
@@ -181,12 +89,9 @@ function formatYear(y: number): string {
   return y < 0 ? `${Math.abs(y)} BCE` : `${y} CE`;
 }
 
-const KIND_COLOR: Record<string, { fill: string; stroke: string }> = {
-  entry:   { fill: '#5b8ef5', stroke: '#5b8ef5' },
-  idea:    { fill: '#1f3a36', stroke: '#3fa796' },
-  thinker: { fill: '#3a2e1a', stroke: '#c79a3f' },
-  linked:  { fill: '#26324a', stroke: '#5b8ef5' },
-};
+const READ_COLOR = { fill: '#1a3528', stroke: '#4aaf70' };   // ≥ 90 % read — green
+const PROG_COLOR = { fill: '#1e2a40', stroke: '#4a7fd4' };   // opened, in progress — blue
+const UNVISITED  = { fill: '#1e1e26', stroke: '#3a3a4a' };   // never opened — grey
 
 // label visibility driven by zoom level — none < 0.7 < partial < 1.4 < all < 2.5 < full
 type LabelMode = 'none' | 'partial' | 'all' | 'full';
@@ -221,12 +126,28 @@ export default function GraphScreen() {
 
   const [mode, setMode] = useState<GraphView>('links');
   const [rawData, setRawData] = useState<GraphData | null>(null);
+  const [visitedOnly, setVisitedOnly] = useState(false);
+  useEffect(() => { getMeta('graph_visited_only').then(v => { if (v === '1') setVisitedOnly(true); }); }, []);
+  const toggleVisitedOnly = () => setVisitedOnly(v => { setMeta('graph_visited_only', v ? '0' : '1').catch(() => {}); return !v; });
   const [nodes, setNodes] = useState<LayoutNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<{ slug: string; title: string } | null>(null);
   const [preview, setPreview] = useState<{ author: string | null; excerpt: string | null } | null>(null);
   const [labelMode, setLabelMode] = useState<LabelMode>('partial');
+
+  // When visitedOnly, filter rawData to center + visited nodes only.
+  const displayData = useMemo<GraphData>(() => {
+    if (!rawData) return { nodes: [], edges: [] };
+    if (!visitedOnly) return rawData;
+    const keepSlugs = new Set(
+      rawData.nodes.filter(n => n.read || n.slug === centerSlug).map(n => n.slug)
+    );
+    return {
+      nodes: rawData.nodes.filter(n => keepSlugs.has(n.slug)),
+      edges: rawData.edges.filter(e => keepSlugs.has(e.from_slug) && keepSlugs.has(e.to_slug)),
+    };
+  }, [rawData, visitedOnly, centerSlug]);
 
   const canvasH = height - insets.top - 44 - 40 - insets.bottom;
 
@@ -334,14 +255,59 @@ export default function GraphScreen() {
   // ── Layout — recomputes whenever data or dimensions change (rotation re-lays
   // without re-fetching). The seeded PRNG ensures stable scatter per entry+mode.
   useEffect(() => {
-    if (!rawData) return;
-    const laid = mode === 'timeline'
-      ? timelineLayout(rawData.nodes, width, canvasH)
-      : forceLayout(rawData.nodes, rawData.edges, width, canvasH, centerSlug, slugSeed((centerSlug ?? '') + mode));
-    setNodes(laid);
-    setEdges(rawData.edges);
-    setLoading(false);
-  }, [rawData, width, canvasH, centerSlug, mode]);
+    if (!rawData || displayData.nodes.length === 0) return;
+    setEdges(displayData.edges);
+
+    if (mode === 'timeline') {
+      setNodes(timelineLayout(displayData.nodes, width, canvasH));
+      setLoading(false);
+      return;
+    }
+
+    // Check on-device layout cache first — settled positions from a prior open.
+    let cancelled = false;
+    const nodeSlugs = displayData.nodes.map(n => n.slug);
+
+    getLayoutCache(centerSlug ?? '', mode, nodeSlugs).then(cached => {
+      if (cancelled) return;
+      if (cached) {
+        // Cache hit: reconstruct LayoutNodes immediately, no force computation.
+        const posMap = new Map(cached.map(p => [p.slug, p]));
+        setNodes(displayData.nodes.map(node => {
+          const p = posMap.get(node.slug);
+          return { ...node, x: (p?.xRel ?? 0.5) * width, y: (p?.yRel ?? 0.5) * canvasH };
+        }));
+        setLoading(false);
+        return;
+      }
+
+      // Cache miss: drive the generator one chunk at a time, yielding to the
+      // event loop between batches so the UI stays responsive.
+      const gen = forceLayout(displayData.nodes, displayData.edges, width, canvasH, centerSlug, slugSeed((centerSlug ?? '') + mode));
+      let firstYield = true;
+      let lastLayout: LayoutNode[] | null = null;
+
+      function step() {
+        const { value, done } = gen.next();
+        if (cancelled) return;
+        if (value) {
+          setNodes(value);
+          if (firstYield) { setLoading(false); firstYield = false; }
+          lastLayout = value;
+        }
+        if (done && lastLayout) {
+          const positions: CachedPosition[] = lastLayout.map(ln => ({
+            slug: ln.slug, xRel: ln.x / width, yRel: ln.y / canvasH,
+          }));
+          setLayoutCache(centerSlug ?? '', mode, nodeSlugs, positions).catch(() => {});
+        }
+        if (!done) setTimeout(step, 0);
+      }
+      step();
+    });
+
+    return () => { cancelled = true; };
+  }, [displayData, width, canvasH, centerSlug, mode]);
 
   const nodeMap = useMemo(
     () => new Map(nodes.map(n => [n.slug, n])),
@@ -402,15 +368,15 @@ export default function GraphScreen() {
   const showLabel = (node: LayoutNode): boolean => {
     const isCenter = node.slug === centerSlug;
     if (labelMode === 'none') return false;
+    if (!node.read && !isCenter && mode !== 'timeline') return false;
     if (labelMode === 'partial') return isCenter || !!node.read || mode === 'timeline';
     return true; // 'all' | 'full'
   };
 
   const labelColor = (node: LayoutNode): string => {
     if (node.slug === centerSlug) return '#5b8ef5';
-    if (node.kind === 'thinker') return '#c79a3f';
-    if (node.kind === 'linked') return '#7da0d8';
-    return '#3fa796';
+    if ((node.readProgress ?? 0) >= 0.9) return '#4aaf70';
+    return '#4a7fd4';
   };
 
   return (
@@ -429,7 +395,15 @@ export default function GraphScreen() {
             <Text style={styles.headerTitle} numberOfLines={1}>{centerTitle}</Text>
           ) : null}
         </View>
-        <View style={styles.back} />
+        <TouchableOpacity
+          style={[styles.visitedToggle, visitedOnly && styles.visitedToggleOn]}
+          onPress={toggleVisitedOnly}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={[styles.visitedToggleText, visitedOnly && styles.visitedToggleTextOn]}>
+            Visited
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* ── View switcher ── */}
@@ -539,10 +513,15 @@ export default function GraphScreen() {
                 {/* ── Nodes ── */}
                 {nodes.map(node => {
                   const isCenter = node.slug === centerSlug;
-                  const kc = KIND_COLOR[node.kind ?? 'idea'] ?? KIND_COLOR.idea;
-                  const r = isCenter ? 11 : node.kind === 'thinker' ? 7 : 6;
-                  // Unread linked neighbours are dimmed so read entries stand out.
-                  const opacity = (!isCenter && mode === 'links' && !node.read) ? 0.35 : 1;
+                  const isVisited = isCenter || node.read;
+                  const progress = node.readProgress ?? 0;
+                  const nc = isCenter ? { fill: '#5b8ef5', stroke: '#5b8ef5' }
+                    : !isVisited ? UNVISITED
+                    : progress >= 0.9 ? READ_COLOR
+                    : PROG_COLOR;
+                  const r = isCenter ? 11 : isVisited ? (node.kind === 'thinker' ? 7 : 6) : 4;
+                  const fill = nc.fill;
+                  const stroke = nc.stroke;
                   const isTimeline = mode === 'timeline';
                   const laneLeft = isTimeline && node.x < width / 2;
                   // Timeline: labels branch outward from their lane; other modes: below node.
@@ -562,10 +541,9 @@ export default function GraphScreen() {
                       <Circle
                         cx={node.x} cy={node.y}
                         r={r}
-                        fill={kc.fill}
-                        stroke={kc.stroke}
-                        strokeWidth={1.5}
-                        opacity={opacity}
+                        fill={fill}
+                        stroke={stroke}
+                        strokeWidth={isVisited ? 1.5 : 1}
                       />
                       {showLabel(node) && (
                         <SvgText
@@ -592,22 +570,19 @@ export default function GraphScreen() {
             <View style={[styles.legendDot, { backgroundColor: '#5b8ef5' }]} />
             <Text style={styles.legendLabel}>This entry</Text>
           </View>
-          {mode === 'links' ? (
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: READ_COLOR.fill, borderWidth: 1, borderColor: READ_COLOR.stroke }]} />
+            <Text style={styles.legendLabel}>Read</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: PROG_COLOR.fill, borderWidth: 1, borderColor: PROG_COLOR.stroke }]} />
+            <Text style={styles.legendLabel}>In progress</Text>
+          </View>
+          {!visitedOnly && (
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#26324a', borderWidth: 1, borderColor: '#5b8ef5' }]} />
-              <Text style={styles.legendLabel}>Linked entry</Text>
+              <View style={[styles.legendDot, { backgroundColor: UNVISITED.fill, borderWidth: 1, borderColor: UNVISITED.stroke }]} />
+              <Text style={styles.legendLabel}>Unvisited</Text>
             </View>
-          ) : (
-            <>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: '#1f3a36', borderWidth: 1, borderColor: '#3fa796' }]} />
-                <Text style={styles.legendLabel}>Idea</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: '#3a2e1a', borderWidth: 1, borderColor: '#c79a3f' }]} />
-                <Text style={styles.legendLabel}>Thinker</Text>
-              </View>
-            </>
           )}
         </View>
 
@@ -663,6 +638,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#111111',
   },
   back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  visitedToggle: {
+    width: 44, height: 44, alignItems: 'center', justifyContent: 'center',
+  },
+  visitedToggleOn: {},
+  visitedToggleText: { fontSize: 11, fontWeight: '600', color: '#555', letterSpacing: 0.3 },
+  visitedToggleTextOn: { color: '#5b8ef5' },
   headerCenter: { flex: 1, alignItems: 'center' },
   headerEyebrow: {
     fontSize: 11, fontWeight: '500',

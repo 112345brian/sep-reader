@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.6.6]
+
+### Added
+- **Graph layout cache** — settled force-layout positions are stored in a new `graph_layout_cache` SQLite table (keyed by article + mode + FNV-1a hash of the node-slug set). On second open the graph is instant; positions are stored as relative (xRel, yRel) fractions so they survive screen rotation and device changes.
+- **Background graph precomputation** — `primeGraphLayouts(slugs)` runs fire-and-forget from `ArticleScreen` (alongside `primeBackfillForSlugs`) after the navigation animation completes. Precomputes and caches layouts for the current article and recent history using only already-cached InPhO data (no new network requests). Includes timeline when all thinker birth/death dates are already in the DB. Session-level dedup via an in-memory Set prevents re-queuing already-processed slugs.
+- **Visited node filter** — in all graph views, nodes you haven't opened yet render smaller (r = 4 vs. 6–7) and grey. A "Visited" toggle in the graph header switches to a visited-only layout that hides unvisited nodes entirely. Preference persists across sessions via `getMeta`/`setMeta`.
+- **Influence edge weights** — `GraphEdge` now carries an optional `weight` that scales the force-layout spring. `buildInfluenceGraph` assigns base weights by InPhO category (teachers/students = 3.0, influenced/influenced\_by = 1.5) multiplied by Wikidata-derived pair weights. `scripts/build-influence-weights.js` queries the Wikidata SPARQL endpoint (P737 influenced\_by, P1066 student\_of, P802 has\_student, resolved via P4223 SEP identifier) and writes `src/data/influenceWeights.ts`; run it once to populate.
+
+### Changed
+- **Graph node colors reflect read status** — visited nodes are now colored by how far you've read rather than by InPhO kind. Green (≥ 90% read) / blue (opened, in progress) / grey (never opened). The center node stays bright blue. Legend updated to match; timeline labels for unvisited thinkers are still shown.
+- **`forceLayout` is now a progressive generator** — yields the initial random scatter immediately (all nodes appear on screen at once), then yields a frame every 8 iterations via `setTimeout(0)` between chunks. The JS thread is never blocked; the layout visibly settles rather than freezing for minutes on large influence graphs.
+- **Force layout O(n²) repulsion hot path** — replaced `Math.sqrt` + two divisions with `k²/dist²` (mathematically equivalent, avoids the sqrt entirely on the pair loop). Iteration count now scales as `max(25, min(80, 900/√n))` so total work stays roughly constant regardless of graph size.
+- **`forceLayout` extracted to `src/utils/forceLayout.ts`** — shared between `GraphScreen` and the background precompute path.
+
+### Fixed
+- **Graph spinner hangs on mode/article switch** — when switching graph mode or navigating to a new article, `displayData` momentarily becomes empty while `rawData` resets. The layout effect now guards on `displayData.nodes.length > 0` so it doesn't fire (and leave the loading spinner stuck) against an empty node set.
+- **Timeline labels hidden for unvisited thinkers** — the "unvisited nodes are never labelled" guard fired before the timeline-mode exemption, silently suppressing labels for thinkers you haven't yet opened in Timeline view.
+- **Settings back chevron unresponsive** — the entire screen including the header was wrapped in a `GestureDetector`. On Android New Architecture (Fabric), the Pan gesture stays in "waiting" state during quick taps and blocks `TouchableOpacity.onPress`. Moved the header outside the `GestureDetector`.
+- **Settings slow to load** — `loadCounts()` was calling `getAllUncachedSlugs()`, fetching all 1838 rows with slug + title just to count them. Replaced with `getEntryCounts()`: a single `SELECT COUNT(*) AS total, COUNT(cached_at) AS cached FROM entries` query.
+
 ## [0.6.5]
 
 ### Fixed
