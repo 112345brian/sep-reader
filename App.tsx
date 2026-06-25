@@ -142,8 +142,14 @@ export default function App() {
         }).catch(() => {});
       }
 
+      // Preload MathJax eagerly only if the math backfill hasn't completed yet
+      // (meaning there are cached articles whose TeX still needs SVG rendering)
+      // or if a bulk download is about to bring in new articles that will need it.
+      // Otherwise let it load lazily on first use — no point paying boot cost.
+      const mathDone = await getMeta('math_inline_v2');
+      if (!mathDone || prefs.downloadAll) preloadMathJax();
+
       if (prefs.downloadAll) {
-        preloadMathJax(); // warm MathJax early — full library will need it
         await startDownloadNotification();
         let lastTotal = 0;
         await downloadAll(p => {
