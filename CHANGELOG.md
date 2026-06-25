@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **Phase snapped from ready to error after boot** — if `getRecentSlugs` (continue mode) or the auto-sync `getMeta` calls threw after `setPhase('ready')`, `boot().catch` would fire and revert the phase to `index_error` while the user was already looking at the home screen. Both operations now run fire-and-forget after the phase transition.
+- **Onboarding stuck on indexing spinner** — if `initialize()` threw during the onboarding flow (network down after seed import, DB error), the unhandled rejection left the app stuck on the indexing spinner with no way to recover. `handleOnboardingDone` now wraps `initialize()` in try/catch and transitions to `index_error` on failure.
+- **Raw TeX after library clear and re-download** — `clearArticleCache` didn't remove the `math_inline_v2` meta key, so `backfillMathInline` was a no-op on the next launch's re-download (it sees the flag and returns). Articles cached with `skipMath:true` would store raw TeX permanently. The cache clear now deletes the backfill flags so they re-run against the fresh downloads.
+- **backfillAst ran up to three times concurrently on cold upgrade boot** — `backfillMathInline` and `backfillMathHashFormat` each fired an unsupervised `backfillAst()` tail-call on completion, racing with the direct `await backfillAst()` in App.tsx. Removed the internal tail-calls; App.tsx's await is now the single entry point.
+- **Priority article pre-fetch ignored library scope** — if the user switched to SEP-only mode but their most-recently-read article was OWL content, the priority fetch would network-fetch and display that OWL article on the loading screen. Now checks `entries.source` and falls back to the default article when the scope doesn't match.
+- **Block items re-rendered on every download progress tick** — `renderItem` closed over `downloadProgress` and `phase`, so FlatList replaced the callback on every progress event and re-rendered all visible article blocks. Phase/progress/article are now held in refs; `renderItem` deps are reduced to the stable `h` object; `BlockItem` is wrapped in `React.memo` with stable props; `extraData` drives bar updates.
+
 ## [0.6.3]
 
 ### Added
