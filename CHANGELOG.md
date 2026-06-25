@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.5]
+
+### Fixed
+- **App crashed immediately on first launch (release build)** — the loading screen's FlatList used `Animated.event` with `useNativeDriver: true` on its `onScroll` prop but was a plain `FlatList`, not `Animated.FlatList`. The New Architecture enforces this as a hard crash in release builds; debug builds swallowed it as a warning. Changed to `Animated.FlatList`.
+
 ## [0.6.4]
 
 ### Fixed

@@ -169,7 +169,7 @@ function Inner({ phase, downloadProgress, article }: Props) {
 
   return (
     <View style={{ flex: 1, backgroundColor: SEP_COLORS.bg }}>
-      <FlatList<ListItem>
+      <Animated.FlatList<ListItem>
         data={data}
         renderItem={renderItem}
         keyExtractor={(_, i) => String(i)}
