@@ -111,9 +111,24 @@ export default function App() {
   async function initialize(prefs: Prefs) {
     syncOnLaunch(); // pull from sync folder if newer, non-blocking
 
+    const count = await getEntryCount();
+
+    if (count === 0) {
+      // First run: index must exist before cacheArticle (which uses UPDATE) can write content.
+      setPhase('indexing');
+      try {
+        await refreshIndexIfStale();
+        const newCount = await getEntryCount();
+        if (newCount === 0) { setPhase('index_error'); return; }
+      } catch {
+        setPhase('index_error');
+        return;
+      }
+    }
+
     // Fetch the priority article in the background so it's readable during loading.
     // Only for SEP-scoped libraries; skip for OWL-only users (neoplatonism is SEP content).
-    // Check the cache first — if already present, skip the network round-trip.
+    // Runs after index is guaranteed to exist so cacheArticle's UPDATE finds a row.
     // Guard against OWL slugs appearing in recent history when user is in SEP-only mode.
     if (prefs.libraryScope !== 'owl') {
       (async () => {
@@ -133,19 +148,8 @@ export default function App() {
       })().catch(() => {});
     }
 
-    const count = await getEntryCount();
-
-    if (count === 0) {
-      setPhase('indexing');
-      try {
-        await refreshIndexIfStale();
-        const newCount = await getEntryCount();
-        if (newCount === 0) { setPhase('index_error'); return; }
-      } catch {
-        setPhase('index_error');
-        return;
-      }
-    } else {
+    if (count > 0) {
+      // Returning user: stale check runs concurrently with the priority article fetch above.
       await refreshIndexIfStale();
     }
 
