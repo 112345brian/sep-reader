@@ -7,15 +7,16 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
-import { getEntry, getEntryCount, getMeta, getPrefs, getRecentSlugs, savePrefs } from './src/services/db';
+import { getEntryCount, getMeta, getPrefs, getRecentSlugs, savePrefs } from './src/services/db';
 import { APP_ACCENT } from './src/utils/sepHtml/render/theme';
 import { syncOnLaunch } from './src/services/dataSync';
 import { importSeedFromUrl } from './src/services/seedImport';
 import type { SeedPhase } from './src/services/seedImport';
-import { backfillAst, backfillMathHashFormat, backfillMathInline, downloadAll, fetchAndCacheArticle, refreshIndexIfStale, syncCachedArticles } from './src/services/catalog';
+import { backfillAst, backfillMathHashFormat, backfillMathInline, downloadAll, refreshIndexIfStale, syncCachedArticles } from './src/services/catalog';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
+import DownloadBar from './src/components/DownloadBar';
 import TestRunnerScreen from './src/screens/TestRunnerScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import ArticleScreen from './src/screens/ArticleScreen';
@@ -27,8 +28,6 @@ import AnnotationsScreen from './src/screens/AnnotationsScreen';
 import GraphScreen from './src/screens/GraphScreen';
 import LoadingArticleScreen from './src/screens/LoadingArticleScreen';
 import { startDownloadNotification, updateDownloadNotification, finishDownloadNotification } from './src/services/downloadNotification';
-
-const FALLBACK_ARTICLE_SLUG = 'neoplatonism';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -91,8 +90,8 @@ export default function App() {
 
   const [phase, setPhase] = useState<AppPhase>('booting');
   const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
+  const [downloadState, setDownloadState] = useState<'full' | 'minimized' | null>(null);
   const [seedPhase, setSeedPhase] = useState<SeedPhase | null>(null);
-  const [priorityArticle, setPriorityArticle] = useState<import('./src/types').EntryRow | null>(null);
   const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
   useEffect(() => {
@@ -109,12 +108,11 @@ export default function App() {
   }
 
   async function initialize(prefs: Prefs) {
-    syncOnLaunch(); // pull from sync folder if newer, non-blocking
+    syncOnLaunch();
 
     const count = await getEntryCount();
 
     if (count === 0) {
-      // First run: index must exist before cacheArticle (which uses UPDATE) can write content.
       setPhase('indexing');
       try {
         await refreshIndexIfStale();
@@ -124,94 +122,56 @@ export default function App() {
         setPhase('index_error');
         return;
       }
-    }
-
-    // Fetch the priority article in the background so it's readable during loading.
-    // Only for SEP-scoped libraries; skip for OWL-only users (neoplatonism is SEP content).
-    // Runs after index is guaranteed to exist so cacheArticle's UPDATE finds a row.
-    // Guard against OWL slugs appearing in recent history when user is in SEP-only mode.
-    if (prefs.libraryScope !== 'owl') {
-      (async () => {
-        const recent = await getRecentSlugs(1);
-        let slug = recent[0]?.slug ?? FALLBACK_ARTICLE_SLUG;
-        if (prefs.libraryScope === 'sep' && recent[0]) {
-          const sourceCheck = await getEntry(slug);
-          if (sourceCheck?.source === 'owl') slug = FALLBACK_ARTICLE_SLUG;
-        }
-        const existing = await getEntry(slug);
-        if (existing?.content_html) { setPriorityArticle(existing); return; }
-        const ok = await fetchAndCacheArticle(slug);
-        if (ok) {
-          const entry = await getEntry(slug);
-          if (entry) setPriorityArticle(entry);
-          return;
-        }
-        // Primary slug failed. It stays uncached so downloadAll will retry it on
-        // the next pass; for as-I-read users it will be fetched on demand when opened.
-        // Fall back to neoplatonism for the loading slot display only.
-        if (slug !== FALLBACK_ARTICLE_SLUG) {
-          const fallbackOk = await fetchAndCacheArticle(FALLBACK_ARTICLE_SLUG);
-          if (fallbackOk) {
-            const entry = await getEntry(FALLBACK_ARTICLE_SLUG);
-            if (entry) setPriorityArticle(entry);
-          }
-        }
-      })().catch(e => console.warn('[priorityArticle]', e));
-    }
-
-    if (count > 0) {
-      // Returning user: stale check runs concurrently with the priority article fetch above.
+    } else {
       await refreshIndexIfStale();
     }
 
-    // Block until all articles are cached. "As I read" (downloadAll=false) skips
-    // this and lets users fetch on demand — every other article open will hit the
-    // network. MathRenderWebView is already mounted so the math backfill can use
-    // it immediately after. Progress is shown on the splash screen.
-    if (prefs.downloadAll) {
-      await startDownloadNotification();
-      let lastTotal = 0;
-      await downloadAll(p => {
-        setDownloadProgress(p);
-        lastTotal = p.total;
-        updateDownloadNotification(p.done, p.total).catch(() => {});
-      }, undefined, prefs.libraryScope);
-      setDownloadProgress(null);
-      finishDownloadNotification(lastTotal).catch(() => {});
-    }
-
-    // One-time migrations — no-ops on subsequent launches (each has a done flag).
-    try { await backfillMathInline(); } catch {}
-    try { await backfillMathHashFormat(); } catch {}
-    try { await backfillAst(); } catch {}
-
     setPhase('ready');
 
-    // Everything after this is fire-and-forget — errors must NOT propagate up to
-    // boot().catch(), which would snap the phase from 'ready' back to 'index_error'.
-    if (prefs.homeMode === 'continue') {
-      getRecentSlugs(1).then(recent => {
-        if (recent.length > 0) {
-          setTimeout(() => {
-            navRef.current?.navigate('Article', {
-              slug: recent[0].slug,
-              title: recent[0].title,
-            });
-          }, 100);
+    // Everything below is fire-and-forget — errors must NOT propagate to boot().catch(),
+    // which would snap the phase from 'ready' back to 'index_error'.
+    (async () => {
+      if (prefs.homeMode === 'continue') {
+        getRecentSlugs(1).then(recent => {
+          if (recent.length > 0) {
+            setTimeout(() => {
+              navRef.current?.navigate('Article', {
+                slug: recent[0].slug,
+                title: recent[0].title,
+              });
+            }, 100);
+          }
+        }).catch(() => {});
+      }
+
+      if (prefs.downloadAll) {
+        setDownloadState('full');
+        await startDownloadNotification();
+        let lastTotal = 0;
+        await downloadAll(p => {
+          setDownloadProgress(p);
+          lastTotal = p.total;
+          updateDownloadNotification(p.done, p.total).catch(() => {});
+        }, undefined, prefs.libraryScope);
+        setDownloadProgress(null);
+        finishDownloadNotification(lastTotal).catch(() => {});
+        setDownloadState(null);
+      }
+
+      try { await backfillMathInline(); } catch {}
+      try { await backfillMathHashFormat(); } catch {}
+      try { await backfillAst(); } catch {}
+
+      Promise.all([getMeta('auto_sync'), getMeta('last_deep_sync')]).then(([autoSync, lastDeepSync]) => {
+        if (autoSync && autoSync !== 'off') {
+          const days = autoSync === '2days' ? 2 : 7;
+          const elapsed = Date.now() - (lastDeepSync ? Number(lastDeepSync) : 0);
+          if (elapsed > days * 24 * 60 * 60 * 1000) {
+            syncCachedArticles(() => {}).catch(() => {});
+          }
         }
       }).catch(() => {});
-    }
-
-    // Auto-sync updates already-cached articles; doesn't need to block the user.
-    Promise.all([getMeta('auto_sync'), getMeta('last_deep_sync')]).then(([autoSync, lastDeepSync]) => {
-      if (autoSync && autoSync !== 'off') {
-        const days = autoSync === '2days' ? 2 : 7;
-        const elapsed = Date.now() - (lastDeepSync ? Number(lastDeepSync) : 0);
-        if (elapsed > days * 24 * 60 * 60 * 1000) {
-          syncCachedArticles(() => {}).catch(() => {});
-        }
-      }
-    }).catch(() => {});
+    })().catch(() => {});
   }
 
   async function handleOnboardingDone(prefs: Prefs) {
@@ -278,11 +238,7 @@ export default function App() {
     return (
       <>
         {mathWebView}
-        <LoadingArticleScreen
-          phase={phase}
-          downloadProgress={downloadProgress}
-          article={priorityArticle}
-        />
+        <LoadingArticleScreen phase={phase} />
       </>
     );
   }
@@ -323,6 +279,13 @@ export default function App() {
         {/* Opaque backdrop behind the translucent system bars (edge-to-edge) */}
         <SystemBarScrim />
         {mathWebView}
+        {downloadState && (
+          <DownloadBar
+            progress={downloadProgress}
+            minimized={downloadState === 'minimized'}
+            onMinimize={() => setDownloadState('minimized')}
+          />
+        )}
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
