@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.4]
 
 ### Fixed
 - **Phase snapped from ready to error after boot** — if `getRecentSlugs` (continue mode) or the auto-sync `getMeta` calls threw after `setPhase('ready')`, `boot().catch` would fire and revert the phase to `index_error` while the user was already looking at the home screen. Both operations now run fire-and-forget after the phase transition.
