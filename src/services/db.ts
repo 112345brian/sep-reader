@@ -197,6 +197,7 @@ export async function getMathSvgMap(hashes: string[]): Promise<Record<string, st
   return map;
 }
 
+
 // Persist one device-rendered equation. Idempotent on hash.
 export async function putMath(
   hash: string,
@@ -211,7 +212,6 @@ export async function putMath(
     [hash, svg, w, h, display ? 1 : 0]
   );
 }
-
 
 export async function upsertIndexEntries(
   entries: { slug: string; title: string; parent_label?: string | null }[]

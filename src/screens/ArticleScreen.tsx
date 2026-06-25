@@ -255,6 +255,14 @@ export default function ArticleScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [astKey]);
 
+  // Native-renderer AST (only parsed when the flag is on and content is ready).
+  const nativeArticle = useMemo(
+    () => (USE_NATIVE_RENDERER && state.phase === 'ready'
+      ? parseSepHtml(state.entry.content_html ?? '')
+      : null),
+    [state],
+  );
+
   const [pendingAnnotation, setPendingAnnotation] = useState<PendingAnnotation | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
   const modalAnnotation =

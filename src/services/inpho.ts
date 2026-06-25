@@ -91,6 +91,7 @@ async function seedFromDevFiles(): Promise<boolean> {
   }
 }
 
+
 /** Ensure the index exists and isn't stale. Safe to call before every graph open. */
 export async function ensureInphoIndex(force = false): Promise<boolean> {
   const count = await inphoIndexCount();

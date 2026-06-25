@@ -199,6 +199,7 @@ function labelModeForScale(s: number): LabelMode {
   return 'full';
 }
 
+
 function IconArrowUp({ color = '#9a9a9a' }: { color?: string }) {
   return (
     <Svg width={21} height={21} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -460,7 +461,7 @@ export default function GraphScreen() {
             </Text>
             <Text style={styles.emptyHint}>
               {mode === 'links'
-                ? "This article has no cross-references to other entries yet,\nor it hasn't been cached — open it once to index its links."
+                ? "This article has no cross-references to other entries yet,\nor it hasn’t been cached — open it once to index its links."
                 : mode === 'influence'
                 ? 'InPhO has no teacher/student/influence edges for this entry.'
                 : mode === 'timeline'
