@@ -1,4 +1,4 @@
-const { getDefaultConfig } = require('/Users/bri/programming/sep-reader/node_modules/expo/metro-config');
+const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
 
 const repoRoot = path.resolve(__dirname, '../../..');
