@@ -7,7 +7,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigationContainerRef } from '@react-navigation/native';
-import { getEntry, getEntryCount, getMeta, getPrefs, getRecentSlugs } from './src/services/db';
+import { getEntry, getEntryCount, getMeta, getPrefs, getRecentSlugs, savePrefs } from './src/services/db';
 import { APP_ACCENT } from './src/utils/sepHtml/render/theme';
 import { syncOnLaunch } from './src/services/dataSync';
 import { importSeedFromUrl } from './src/services/seedImport';
@@ -140,12 +140,17 @@ export default function App() {
         }
         const existing = await getEntry(slug);
         if (existing?.content_html) { setPriorityArticle(existing); return; }
-        const ok = await fetchAndCacheArticle(slug);
+        let ok = await fetchAndCacheArticle(slug);
+        if (!ok && slug !== FALLBACK_ARTICLE_SLUG) {
+          // Recent slug may be stale (404); fall back to neoplatonism.
+          slug = FALLBACK_ARTICLE_SLUG;
+          ok = await fetchAndCacheArticle(slug);
+        }
         if (ok) {
           const entry = await getEntry(slug);
           if (entry) setPriorityArticle(entry);
         }
-      })().catch(() => {});
+      })().catch(e => console.warn('[priorityArticle]', e));
     }
 
     if (count > 0) {
@@ -214,6 +219,8 @@ export default function App() {
       }
       setSeedPhase(null);
     }
+    // Save prefs after any seed import so they land in the final DB, not the pre-seed one.
+    await savePrefs(prefs);
     setPhase('indexing');
     try {
       await initialize(prefs);

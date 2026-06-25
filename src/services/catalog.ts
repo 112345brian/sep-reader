@@ -218,11 +218,15 @@ export async function downloadAll(
   for (let i = 0; i < uncached.length; i += CONCURRENCY) {
     if (signal?.aborted) return;
     const chunk = uncached.slice(i, i + CONCURRENCY);
-    await Promise.all(chunk.map(async ({ slug, title }) => {
-      await fetchAndCacheArticle(slug, { skipMath: true });
-      done++;
-      onProgress({ done, total, current: title });
-    }));
+    await Promise.all(chunk.map(({ slug, title }) =>
+      fetchAndCacheArticle(slug, { skipMath: true }).then(() => {
+        // Increment inside .then() so each article fires its own progress event
+        // rather than batching. done++ after await in concurrent callbacks can
+        // read the same value twice; .then() serializes via microtask queue safely
+        // because each closure captures a separate resolve tick.
+        onProgress({ done: ++done, total, current: title });
+      })
+    ));
     await new Promise<void>(r => setTimeout(r, 100));
   }
 }
@@ -251,7 +255,14 @@ export async function syncCachedArticles(
 
 export async function fetchAndCacheArticle(slug: string, opts: { skipMath?: boolean } = {}): Promise<boolean> {
   try {
-    const res = await fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/entries/${slug}/`, { headers: SEP_HEADERS, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) return false;
     const html = await res.text();
 

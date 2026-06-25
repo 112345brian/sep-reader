@@ -4,7 +4,6 @@ import {
   Animated, useWindowDimensions, TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { savePrefs } from '../services/db';
 import type { Prefs } from '../services/db';
 
 const SCOPE_DOWNLOAD_DESC: Record<Prefs['libraryScope'], string> = {
@@ -38,7 +37,8 @@ export default function OnboardingScreen({ onDone }: Props) {
 
   const finish = async () => {
     const prefs: Prefs = { homeMode, downloadAll, libraryScope, seedUrl: seedUrl.trim() };
-    await savePrefs(prefs);
+    // savePrefs is called in handleOnboardingDone after any seed import replaces the DB,
+    // so prefs land in the final DB. Don't save here — the seed import would wipe them.
     onDone(prefs);
   };
 

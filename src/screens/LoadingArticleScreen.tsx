@@ -74,6 +74,13 @@ function Inner({ phase, downloadProgress, article }: Props) {
   liveProgress.current = downloadProgress;
   liveArticle.current = article;
 
+  // Stable extraData — inline object literal would be a new reference every render,
+  // defeating all FlatList memoization during download progress ticks.
+  const extraData = useMemo(
+    () => ({ phase, downloadProgress, article }),
+    [phase, downloadProgress, article],
+  );
+
   // Drives hint fade-out and arrow bounce — both on native thread.
   const scrollY = useRef(new Animated.Value(0)).current;
   const arrowY = useRef(new Animated.Value(0)).current;
@@ -175,7 +182,7 @@ function Inner({ phase, downloadProgress, article }: Props) {
         keyExtractor={(_, i) => String(i)}
         stickyHeaderIndices={[0]}
         ListHeaderComponent={listHeader}
-        extraData={{ phase, downloadProgress, article }}
+        extraData={extraData}
         style={{ backgroundColor: SEP_COLORS.bg }}
         contentContainerStyle={{
           paddingHorizontal: SEP_SIDE_PAD,
