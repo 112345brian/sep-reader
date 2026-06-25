@@ -140,15 +140,21 @@ export default function App() {
         }
         const existing = await getEntry(slug);
         if (existing?.content_html) { setPriorityArticle(existing); return; }
-        let ok = await fetchAndCacheArticle(slug);
-        if (!ok && slug !== FALLBACK_ARTICLE_SLUG) {
-          // Recent slug may be stale (404); fall back to neoplatonism.
-          slug = FALLBACK_ARTICLE_SLUG;
-          ok = await fetchAndCacheArticle(slug);
-        }
+        const ok = await fetchAndCacheArticle(slug);
         if (ok) {
           const entry = await getEntry(slug);
           if (entry) setPriorityArticle(entry);
+          return;
+        }
+        // Primary slug failed. It stays uncached so downloadAll will retry it on
+        // the next pass; for as-I-read users it will be fetched on demand when opened.
+        // Fall back to neoplatonism for the loading slot display only.
+        if (slug !== FALLBACK_ARTICLE_SLUG) {
+          const fallbackOk = await fetchAndCacheArticle(FALLBACK_ARTICLE_SLUG);
+          if (fallbackOk) {
+            const entry = await getEntry(FALLBACK_ARTICLE_SLUG);
+            if (entry) setPriorityArticle(entry);
+          }
         }
       })().catch(e => console.warn('[priorityArticle]', e));
     }
