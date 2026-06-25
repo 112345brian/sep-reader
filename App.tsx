@@ -16,7 +16,6 @@ import { backfillAst, backfillMathHashFormat, backfillMathInline, downloadAll, r
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
-import DownloadBar from './src/components/DownloadBar';
 import TestRunnerScreen from './src/screens/TestRunnerScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import ArticleScreen from './src/screens/ArticleScreen';
@@ -89,8 +88,6 @@ export default function App() {
   }
 
   const [phase, setPhase] = useState<AppPhase>('booting');
-  const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
-  const [downloadState, setDownloadState] = useState<'full' | 'minimized' | null>(null);
   const [seedPhase, setSeedPhase] = useState<SeedPhase | null>(null);
   const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
@@ -145,17 +142,13 @@ export default function App() {
       }
 
       if (prefs.downloadAll) {
-        setDownloadState('full');
         await startDownloadNotification();
         let lastTotal = 0;
         await downloadAll(p => {
-          setDownloadProgress(p);
           lastTotal = p.total;
           updateDownloadNotification(p.done, p.total).catch(() => {});
         }, undefined, prefs.libraryScope);
-        setDownloadProgress(null);
         finishDownloadNotification(lastTotal).catch(() => {});
-        setDownloadState(null);
       }
 
       try { await backfillMathInline(); } catch {}
@@ -279,13 +272,6 @@ export default function App() {
         {/* Opaque backdrop behind the translucent system bars (edge-to-edge) */}
         <SystemBarScrim />
         {mathWebView}
-        {downloadState && (
-          <DownloadBar
-            progress={downloadProgress}
-            minimized={downloadState === 'minimized'}
-            onMinimize={() => setDownloadState('minimized')}
-          />
-        )}
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
