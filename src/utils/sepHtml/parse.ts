@@ -127,6 +127,11 @@ function parseInlines(nodes: DomNode[]): Inline[] {
       case 'a': {
         const href = n.attribs?.href ?? '';
         const cls = n.attribs?.class ?? '';
+        // notes.html#... are footnote back-refs on a separate page — strip the link
+        if (/^notes\.html/i.test(href)) {
+          out.push(...parseInlines(kids));
+          break;
+        }
         out.push({
           t: 'link',
           href,

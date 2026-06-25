@@ -490,6 +490,14 @@ export default function ArticleScreen() {
       else nativeArticleRef.current?.scrollToSection(href.replace(/^[^#]*#?/, ''));
       return;
     }
+    // slug.html relative cross-reference (e.g. inductive-logic.html)
+    const slugHtml = href.match(/^([a-z][a-z0-9-]+)\.html(?:#.*)?$/);
+    if (slugHtml) {
+      const target = slugHtml[1];
+      if (!/^(supplement|figdesc|appendix|notes)/.test(target) && target !== slug)
+        nav.push('Article', { slug: target, title: target, fromSlug: slug });
+      return;
+    }
     // Everything else external → open in the system browser.
     if (href.startsWith('http')) Linking.openURL(href).catch(() => {});
   }, [slug, nav]);
