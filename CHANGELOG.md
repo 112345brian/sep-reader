@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.7]
+
+### Changed
+- **Graph blocks until layout is ready** — on a cache miss the graph no longer shows intermediate settling frames. Instead it holds the loading screen (spinner + "Computing layout… Graph is still loading — keep reading for now") until the layout finishes and is written to cache. Cache hits (most opens after the first) are still instant.
+- **MathJax moved out of the JS bundle** — the 2.9 MB MathJax engine is now a Metro asset (`src/assets/mathjax-full.b64`) instead of a parsed JavaScript module, eliminating its parse overhead from every cold start. In full-library mode (`downloadAll`) it is preloaded at boot; otherwise it loads lazily on first math render request.
+
 ## [0.6.6]
 
 ### Added

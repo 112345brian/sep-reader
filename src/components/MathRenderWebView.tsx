@@ -1,8 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 import WebView from 'react-native-webview';
-import { _registerInject, _onMessage } from '../services/mathRender';
-import { TEX_SVG_FULL_B64 } from '../utils/mathjax/texSvgFull';
+import { _registerInject, _onMessage, _signalDomReady } from '../services/mathRender';
 
 // Off-screen WebView that hosts MathJax (which can't run on Hermes) and converts
 // TeX → SVG on request from the fetch/backfill pipeline. Mounted once, app-wide.
@@ -12,10 +11,11 @@ import { TEX_SVG_FULL_B64 } from '../utils/mathjax/texSvgFull';
 // <use> refs into a shared cache that won't exist once equations are stored and
 // rendered independently in the native renderer.
 //
-// SOURCE NOTE: this loads the MathJax engine (MIT), bundled as base64 (see
-// texSvgFull.ts) so math renders offline with no CDN dependency. The SVGs it
-// produces are SEP-derived but generated on-device at runtime and stored
-// locally — never bundled or shipped (see NOTICE.md / AGENTS.md).
+// SOURCE NOTE: this loads the MathJax engine (MIT) from a Metro asset
+// (src/assets/mathjax-full.b64) via mathRender.preloadMathJax(). Keeping it
+// as an asset rather than a JS module avoids the 2.9 MB parse overhead on
+// every cold start. The SVGs it produces are generated on-device at runtime
+// and never bundled or shipped (see NOTICE.md / AGENTS.md).
 
 // The page bridge: configure MathJax, then expose __renderMath. MathJax itself
 // is injected separately after load (it's ~2.3MB — too large to inline in the
@@ -57,19 +57,6 @@ const BOOT_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8">
 </script>
 </head><body></body></html>`;
 
-// Decode and run the bundled MathJax engine inside the page. atob is native in
-// the WebView (a real browser engine), so the 2.3MB base64 decodes there.
-const LOAD_MATHJAX_JS = `(function(){
-  try {
-    var src = atob(${JSON.stringify(TEX_SVG_FULL_B64)});
-    var s = document.createElement('script');
-    s.text = src;
-    document.head.appendChild(s);
-  } catch (e) {
-    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', error: String(e) }));
-  }
-})(); true;`;
-
 export default function MathRenderWebView() {
   const ref = useRef<WebView>(null);
 
@@ -83,11 +70,10 @@ export default function MathRenderWebView() {
         ref={ref}
         source={{ html: BOOT_HTML }}
         originWhitelist={['*']}
-        onLoadEnd={() => ref.current?.injectJavaScript(LOAD_MATHJAX_JS)}
+        onLoadEnd={() => _signalDomReady()}
         onMessage={e => _onMessage(e.nativeEvent.data)}
         javaScriptEnabled
         domStorageEnabled
-        // Keep it alive in the background; never throttle the render bridge.
         androidLayerType="software"
         cacheEnabled
       />

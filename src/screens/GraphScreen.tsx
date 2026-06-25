@@ -132,6 +132,7 @@ export default function GraphScreen() {
   const [nodes, setNodes] = useState<LayoutNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [loading, setLoading] = useState(true);
+  const [warming, setWarming] = useState(false);
   const [selected, setSelected] = useState<{ slug: string; title: string } | null>(null);
   const [preview, setPreview] = useState<{ author: string | null; excerpt: string | null } | null>(null);
   const [labelMode, setLabelMode] = useState<LabelMode>('partial');
@@ -240,6 +241,7 @@ export default function GraphScreen() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setWarming(false);
     setRawData(null);
     const load = mode === 'links'
       ? getArticleLinkGraph(centerSlug ?? '')
@@ -283,23 +285,21 @@ export default function GraphScreen() {
 
       // Cache miss: drive the generator one chunk at a time, yielding to the
       // event loop between batches so the UI stays responsive.
+      setWarming(true);
       const gen = forceLayout(displayData.nodes, displayData.edges, width, canvasH, centerSlug, slugSeed((centerSlug ?? '') + mode));
-      let firstYield = true;
       let lastLayout: LayoutNode[] | null = null;
 
       function step() {
         const { value, done } = gen.next();
         if (cancelled) return;
-        if (value) {
-          setNodes(value);
-          if (firstYield) { setLoading(false); firstYield = false; }
-          lastLayout = value;
-        }
+        if (value) { setNodes(value); lastLayout = value; }
         if (done && lastLayout) {
           const positions: CachedPosition[] = lastLayout.map(ln => ({
             slug: ln.slug, xRel: ln.x / width, yRel: ln.y / canvasH,
           }));
           setLayoutCache(centerSlug ?? '', mode, nodeSlugs, positions).catch(() => {});
+          setWarming(false);
+          setLoading(false);
         }
         if (!done) setTimeout(step, 0);
       }
@@ -426,7 +426,12 @@ export default function GraphScreen() {
         {loading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator color="#5b8ef5" />
-            <Text style={styles.loadingLabel}>Mapping connections…</Text>
+            <Text style={styles.loadingLabel}>
+              {warming ? 'Computing layout…' : 'Mapping connections…'}
+            </Text>
+            {warming && (
+              <Text style={styles.loadingHint}>Graph is still loading — keep reading for now</Text>
+            )}
           </View>
         ) : nodes.length === 0 ? (
           <View style={styles.loadingWrap}>
@@ -679,6 +684,7 @@ const styles = StyleSheet.create({
 
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingLabel: { color: '#444', fontSize: 13 },
+  loadingHint: { color: '#555', fontSize: 12, textAlign: 'center', paddingHorizontal: 40, lineHeight: 18 },
   emptyTitle: { color: '#555', fontSize: 17, fontWeight: '500' },
   emptyHint: { color: '#333', fontSize: 14, textAlign: 'center', paddingHorizontal: 40, lineHeight: 21 },
 

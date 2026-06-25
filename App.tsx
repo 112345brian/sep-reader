@@ -13,6 +13,7 @@ import { syncOnLaunch } from './src/services/dataSync';
 import { importSeedFromUrl } from './src/services/seedImport';
 import type { SeedPhase } from './src/services/seedImport';
 import { backfillAst, backfillMathHashFormat, backfillMathInline, downloadAll, refreshIndexIfStale, syncCachedArticles } from './src/services/catalog';
+import { preloadMathJax } from './src/services/mathRender';
 import type { Prefs } from './src/services/db';
 import { IS_TEST_BUILD } from './src/testConfig';
 import MathRenderWebView from './src/components/MathRenderWebView';
@@ -142,6 +143,7 @@ export default function App() {
       }
 
       if (prefs.downloadAll) {
+        preloadMathJax(); // warm MathJax early — full library will need it
         await startDownloadNotification();
         let lastTotal = 0;
         await downloadAll(p => {
