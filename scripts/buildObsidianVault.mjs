@@ -459,7 +459,7 @@ function shouldSkip(node) {
 
 // ── TeX → Obsidian math ───────────────────────────────────────────────────────
 function convertMath(text) {
-  text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, eq) => `\n$$\n${eq.trim()}\n$$\n`);
+  text = text.replace(/\s*\\\[([\s\S]*?)\\\]\s*/g, (_, eq) => `\n$$\n${eq.trim()}\n$$\n`);
   text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_, eq) => `$${eq}$`);
   return text;
 }
@@ -504,7 +504,11 @@ function extractSeeAlsoYaml(doc, slugToFile, s2t) {
 //   counter     : () => number         for ordered lists
 
 function nodeToMd(node, ctx) {
-  if (node.type === 'text') return convertMath(node.data.replace(/\s*\n\s*/g, ' ').replace(/ /g, ' '));
+  if (node.type === 'text') {
+    // Whitespace-only nodes between block elements (containing \n) contribute nothing
+    if (node.data.includes('\n') && /^[\s ]*$/.test(node.data)) return '';
+    return convertMath(node.data.replace(/\s*\n\s*/g, ' ').replace(/ /g, ' '));
+  }
   if (node.type !== 'tag') return '';
   if (shouldSkip(node)) return '';
 
