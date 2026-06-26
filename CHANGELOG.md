@@ -16,6 +16,7 @@
 
 ### Fixed
 - **Pinch-zoom flung the graph off-screen** — React Native scales about the view centre by default, but the pinch focal math assumed a top-left origin, so zooming away from 1× drifted the content; this was compounded by the gesture being rebuilt mid-pinch whenever a label-visibility re-render fired. Fixed by setting `transformOrigin: 'left top'` (matching the focal math and the tap hit-test), memoising the gesture so a re-render can't disrupt it mid-pinch, and clamping pan/zoom so the graph can never leave the viewport.
+- **Footnote markers showed brackets** — SEP wraps footnote refs as `<sup>[<a href="notes.html#note-1">1</a>]</sup>`, with the `[` `]` as sibling text nodes and an anchor whose href doesn't start with `#`. The parser's footnote detection only matched `^#`, so these fell through to generic `<sup>` rendering and kept the literal brackets. Detection now matches `notes.html#note-N` / `#note-N` (wrapped or bare), drops the bracket siblings, and renders just the number — wired to the footnote sheet.
 
 ## [0.6.7]
 

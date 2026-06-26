@@ -131,6 +131,21 @@ describe('parseSepHtml', () => {
     expect(footnotes['note-1'].some(i => i.t === 'link')).toBe(false);
   });
 
+  it('renders SEP footnote refs as bracket-free fnref markers', () => {
+    // Real SEP shape: the [ ] are sibling text nodes inside the <sup>, and the
+    // anchor points at the separate notes page (href does not start with "#").
+    const html = `<div id="main-text"><p>survive.<sup>[<a href="notes.html#note-1" id="ref-1">1</a>]</sup> His</p></div>`;
+    const inlines = allInlines(parseSepHtml(html).blocks);
+    const fnrefs = inlines.filter(i => i.t === 'fnref');
+    expect(fnrefs).toHaveLength(1);
+    expect((fnrefs[0] as Extract<Inline, { t: 'fnref' }>).label).toBe('1');   // no brackets
+    expect((fnrefs[0] as Extract<Inline, { t: 'fnref' }>).href).toBe('#note-1'); // normalised for the sheet
+    // No literal "[" / "]" text survives around the marker.
+    const text = inlines.filter(i => i.t === 'text').map(i => (i as Extract<Inline, { t: 'text' }>).v).join('');
+    expect(text).not.toContain('[');
+    expect(text).not.toContain(']');
+  });
+
   it('has no footnotes map entries for articles without notes', () => {
     const { footnotes } = parseSepHtml('<div id="main-text"><p>Plain.</p></div>');
     expect(Object.keys(footnotes)).toHaveLength(0);

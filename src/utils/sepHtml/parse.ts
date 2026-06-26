@@ -127,6 +127,12 @@ function parseInlines(nodes: DomNode[]): Inline[] {
       case 'a': {
         const href = n.attribs?.href ?? '';
         const cls = n.attribs?.class ?? '';
+        // Bare footnote ref (not wrapped in <sup>) → bracket-free marker.
+        const fn = href.match(/#((?:note|fn|footnote)[-_]?\d+)/i);
+        if (fn) {
+          out.push({ t: 'fnref', href: `#${fn[1]}`, label: textOf(n).replace(/[[\]]/g, '') });
+          break;
+        }
         // notes.html#... are footnote back-refs on a separate page — strip the link
         if (/^notes\.html/i.test(href)) {
           out.push(...parseInlines(kids));
@@ -141,13 +147,18 @@ function parseInlines(nodes: DomNode[]): Inline[] {
         break;
       }
       case 'sup': {
-        // A <sup> wrapping a single anchor to a note/footnote is a footnote ref.
+        // Footnote ref, e.g. <sup>[<a href="notes.html#note-1">1</a>]</sup> or
+        // <sup><a href="#note-1">1</a></sup>. SEP wraps the number in literal
+        // [ ] sibling text nodes — drop them and keep just the number, wiring it
+        // to the footnote sheet (normalising notes.html#note-N → #note-N).
         const anchor = kids.find(
-          k => isTag(k) && k.name?.toLowerCase() === 'a' && /^#/.test(k.attribs?.href ?? '')
+          k => isTag(k) && k.name?.toLowerCase() === 'a' &&
+            /#(note|fn|footnote)/i.test(k.attribs?.href ?? '')
         );
-        const href = anchor?.attribs?.href ?? '';
-        if (anchor && /#(note|fn)/i.test(href)) {
-          out.push({ t: 'fnref', href, label: textOf(anchor).replace(/[[\]]/g, '') });
+        if (anchor) {
+          const href = anchor.attribs?.href ?? '';
+          const m = href.match(/#((?:note|fn|footnote)[-_]?\d+)/i);
+          out.push({ t: 'fnref', href: m ? `#${m[1]}` : href, label: textOf(anchor).replace(/[[\]]/g, '') });
         } else {
           out.push({ t: 'sup', children: parseInlines(kids) });
         }
