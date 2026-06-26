@@ -38,6 +38,14 @@ function outerHtml(n: DomNode): string {
 
 // ── Inline parsing ───────────────────────────────────────────────────────────
 
+// A footnote reference is any anchor pointing at a note id, whether same-page
+// (#note-1) or on SEP's separate notes page (notes.html#note-1). Returns the
+// normalised id ("note-1") so the renderer can wire it to the footnote sheet.
+function footnoteId(href: string): string | null {
+  const m = href.match(/#((?:note|fn|footnote)[-_]?\d+)/i);
+  return m ? m[1] : null;
+}
+
 // Trim leading and trailing pure-whitespace text nodes from an inline array,
 // mirroring the browser rule: whitespace-only text between block elements is
 // invisible. Also strips any leading/trailing space character left by the
@@ -127,10 +135,11 @@ function parseInlines(nodes: DomNode[]): Inline[] {
       case 'a': {
         const href = n.attribs?.href ?? '';
         const cls = n.attribs?.class ?? '';
-        // Bare footnote ref (not wrapped in <sup>) → bracket-free marker.
-        const fn = href.match(/#((?:note|fn|footnote)[-_]?\d+)/i);
-        if (fn) {
-          out.push({ t: 'fnref', href: `#${fn[1]}`, label: textOf(n).replace(/[[\]]/g, '') });
+        // A link to a note id is a footnote reference — render a bracket-free
+        // marker wired to the note sheet, regardless of <sup> wrapping.
+        const note = footnoteId(href);
+        if (note) {
+          out.push({ t: 'fnref', href: `#${note}`, label: textOf(n).replace(/[[\]]/g, '') });
           break;
         }
         // notes.html#... are footnote back-refs on a separate page — strip the link
@@ -147,21 +156,13 @@ function parseInlines(nodes: DomNode[]): Inline[] {
         break;
       }
       case 'sup': {
-        // Footnote ref, e.g. <sup>[<a href="notes.html#note-1">1</a>]</sup> or
-        // <sup><a href="#note-1">1</a></sup>. SEP wraps the number in literal
-        // [ ] sibling text nodes — drop them and keep just the number, wiring it
-        // to the footnote sheet (normalising notes.html#note-N → #note-N).
-        const anchor = kids.find(
-          k => isTag(k) && k.name?.toLowerCase() === 'a' &&
-            /#(note|fn|footnote)/i.test(k.attribs?.href ?? '')
-        );
-        if (anchor) {
-          const href = anchor.attribs?.href ?? '';
-          const m = href.match(/#((?:note|fn|footnote)[-_]?\d+)/i);
-          out.push({ t: 'fnref', href: m ? `#${m[1]}` : href, label: textOf(anchor).replace(/[[\]]/g, '') });
-        } else {
-          out.push({ t: 'sup', children: parseInlines(kids) });
-        }
+        // SEP writes footnote refs as <sup>[<a href="notes.html#note-1">1</a>]</sup>.
+        // The <a> already parses to an fnref above; if this <sup> is a footnote
+        // ref, emit just that marker — dropping the literal [ ] siblings and the
+        // <sup> wrapper (fnref renders raised on its own). Real exponents keep it.
+        const inner = parseInlines(kids);
+        const fn = inner.find(i => i.t === 'fnref');
+        out.push(fn ?? { t: 'sup', children: inner });
         break;
       }
       case 'sub':
