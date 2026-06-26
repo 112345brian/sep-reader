@@ -1,6 +1,6 @@
 {
   "name": "Nous",
-  "version": "0.6.6",
+  "version": "0.6.8",
   "private": true,
   "scripts": {
     "android": "react-native run-android",

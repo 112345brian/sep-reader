@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.8]
+
+### Added
+- **Tap a graph node to preview it** — tapping any node now opens a peek card with the entry's title, author, the sentence that links to it, and a generous excerpt; "Open article →" navigates. Taps previously did nothing because the `GestureDetector` swallowed the SVG `onPress`; the tap is now mapped back into graph space and resolved to the nearest node.
+- **Link previews in the reader** — tapping an in-text cross-reference to another entry shows the same peek card (author + scrollable excerpt) before navigating, rather than jumping straight there. Toggleable via **Settings → Reading → "Preview links before opening"** (default on); turning it off restores instant navigation.
+- **Fit-to-view** — the graph frames every node on open (and after rotation) so nothing starts off-screen; double-tap resets to that framing.
+
+### Changed
+- **All node labels are shown** — every node is labelled at any zoom above the minimum, not just visited/center nodes.
+- **Legible labels** — node labels get a dark halo (a stroked copy drawn underneath, since react-native-svg ignores `paint-order`) so they stay readable over edges and neighbouring labels.
+- **Richer preview content** — the preview excerpt is pulled on-the-fly from the cached article body (much longer than the stored teaser) and the card body scrolls. Newly cached excerpts are also longer (320 vs 160 chars).
+- **Zoom-out is capped at the fit view** — the graph can't be shrunk below "everything visible"; at the fit scale it is centred and locked, and once zoomed in any node can be panned all the way to mid-screen so edge nodes and their labels stay reachable.
+- **The legend fades out as you zoom in** so it stops covering nodes, and it no longer intercepts node taps (`pointerEvents="none"`).
+
+### Fixed
+- **Pinch-zoom flung the graph off-screen** — React Native scales about the view centre by default, but the pinch focal math assumed a top-left origin, so zooming away from 1× drifted the content; this was compounded by the gesture being rebuilt mid-pinch whenever a label-visibility re-render fired. Fixed by setting `transformOrigin: 'left top'` (matching the focal math and the tap hit-test), memoising the gesture so a re-render can't disrupt it mid-pinch, and clamping pan/zoom so the graph can never leave the viewport.
+
 ## [0.6.7]
 
 ### Changed

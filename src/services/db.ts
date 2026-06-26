@@ -278,7 +278,7 @@ export async function cacheArticle(
   const db = await getDb();
   const wordCount = countWords(data.content_html ?? '');
   const hash = contentHash(data.content_html ?? '');
-  const excerpt = makeExcerpt(data.preamble_html || data.content_html || '');
+  const excerpt = makeExcerpt(data.preamble_html || data.content_html || '', 320);
   const now = Date.now();
 
   // Preserve the old version record before overwriting

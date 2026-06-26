@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, useWindowDimensions,
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, useWindowDimensions, ScrollView,
 } from 'react-native';
 import Svg, { Line, Circle, G, Rect, Text as SvgText, Path } from 'react-native-svg';
 import Reanimated, {
@@ -11,7 +11,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { getEntryPreview, getMeta, setMeta } from '../services/db';
+import { getEntryPreview, getEntry, getMeta, setMeta } from '../services/db';
+import { makeExcerpt } from '../utils/excerpt';
 import { getArticleLinkGraph, getLayoutCache, setLayoutCache } from '../services/graphDb';
 import type { GraphNode, GraphEdge, GraphData, GraphView, CachedPosition } from '../services/graphDb';
 import { forceLayout, slugSeed } from '../utils/forceLayout';
@@ -134,7 +135,7 @@ export default function GraphScreen() {
   const [loading, setLoading] = useState(true);
   const [warming, setWarming] = useState(false);
   const [selected, setSelected] = useState<{ slug: string; title: string } | null>(null);
-  const [preview, setPreview] = useState<{ author: string | null; excerpt: string | null } | null>(null);
+  const [preview, setPreview] = useState<{ author: string | null; excerpt: string | null; context: string | null } | null>(null);
   const [labelMode, setLabelMode] = useState<LabelMode>('partial');
 
   // When visitedOnly, filter rawData to center + visited nodes only.
@@ -161,6 +162,19 @@ export default function GraphScreen() {
   const savedTy = useSharedValue(0);
   const focalX0 = useSharedValue(0);
   const focalY0 = useSharedValue(0);
+  // The "fit" transform that frames every node — also the double-tap target.
+  const fitScale = useSharedValue(1);
+  const fitTx = useSharedValue(0);
+  const fitTy = useSharedValue(0);
+  // World-space bounding box of the nodes, used to clamp panning/zooming so the
+  // graph can never be flung off-screen.
+  const bMinX = useSharedValue(0);
+  const bMaxX = useSharedValue(0);
+  const bMinY = useSharedValue(0);
+  const bMaxY = useSharedValue(0);
+  // Mirror of labelMode on the UI thread so the zoom reaction only re-renders
+  // React on an actual threshold crossing (not every frame).
+  const labelModeSV = useSharedValue<LabelMode>('partial');
 
   // Keep sharedValues for canvas dimensions accessible in worklets
   const widthSV = useSharedValue(width);
@@ -168,65 +182,160 @@ export default function GraphScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { widthSV.value = width; canvasHSV.value = canvasH; }, [width, canvasH]);
 
-  // Drive label visibility from zoom level
+  // Drive label visibility from zoom level — but only cross into React (a
+  // re-render) when the mode actually changes, so a pinch doesn't fire a
+  // setState every frame and recreate the SVG mid-gesture.
   useAnimatedReaction(
     () => scale.value,
-    (cur, prev) => {
-      if (cur === prev) return;
+    (cur) => {
       const next = labelModeForScale(cur);
-      runOnJS(setLabelMode)(next);
+      if (next !== labelModeSV.value) {
+        labelModeSV.value = next;
+        runOnJS(setLabelMode)(next);
+      }
     },
   );
 
-  // Reset pan/zoom whenever the graph data changes (shared values intentionally omitted)
+  // Frame the whole graph whenever the laid-out node set changes, so every node
+  // is on-screen from the start (and after rotation). The same transform is the
+  // double-tap reset target. (shared values intentionally omitted from deps)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { scale.value = 1; translateX.value = 0; translateY.value = 0; }, [nodes]);
+  useEffect(() => {
+    if (!nodes.length) {
+      fitScale.value = 1; fitTx.value = 0; fitTy.value = 0;
+      scale.value = 1; translateX.value = 0; translateY.value = 0;
+      return;
+    }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      if (n.x < minX) minX = n.x;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.y > maxY) maxY = n.y;
+    }
+    const pad = 56; // breathing room for labels around the bounding box
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
+    // Never zoom past 1× for small/sparse graphs; never below MIN_SCALE.
+    const s = Math.max(MIN_SCALE, Math.min(1, (width - 2 * pad) / bw, (canvasH - 2 * pad) / bh));
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    // screen = world * scale + translate (transformOrigin is top-left)
+    const tx = width / 2 - cx * s;
+    const ty = canvasH / 2 - cy * s;
+    fitScale.value = s; fitTx.value = tx; fitTy.value = ty;
+    bMinX.value = minX; bMaxX.value = maxX; bMinY.value = minY; bMaxY.value = maxY;
+    scale.value = s; translateX.value = tx; translateY.value = ty;
+  }, [nodes, width, canvasH]);
 
   // ── Gestures ─────────────────────────────────────────────────────────────
-  const panGesture = Gesture.Pan()
-    .maxPointers(1)
-    .onStart(() => {
-      'worklet';
-      savedTx.value = translateX.value;
-      savedTy.value = translateY.value;
-    })
-    .onChange(e => {
-      'worklet';
-      translateX.value = savedTx.value + e.translationX;
-      translateY.value = savedTy.value + e.translationY;
-    });
+  // A single tap maps a screen point back to world space and selects the
+  // nearest node. Kept in a ref so the memoised gesture below never has to be
+  // rebuilt when `nodes`/`selectNode` change — rebuilding it mid-pinch was what
+  // made the graph stutter and fly off-screen on zoom-out.
+  const tapRef = useRef<(x: number, y: number) => void>(() => {});
+  const callTap = useCallback((x: number, y: number) => { tapRef.current(x, y); }, []);
 
-  const pinchGesture = Gesture.Pinch()
-    .onStart(e => {
+  // Build the gesture exactly once. Every value it closes over is either a
+  // shared value or a stable callback, so an empty dep list is correct and the
+  // GestureDetector never re-attaches a fresh gesture during an active pinch.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const gesture = useMemo(() => {
+    // Clamp one axis. When the node cloud fits within the viewport (i.e. at the
+    // fit scale, which is also the minimum zoom) it is centred and locked — no
+    // drifting the fully-visible graph off-centre. Once zoomed in past fit, any
+    // node can be panned all the way to the viewport centre, so edge nodes (and
+    // their outward labels) are fully reachable rather than stuck at the rim.
+    // At (or near) the fit scale the graph is fully framed, so lock it to the fit
+    // transform — no drifting the whole-visible graph around. Once zoomed in past
+    // fit, allow panning until any node can reach mid-screen, so edge nodes (and
+    // their outward labels) are fully reachable rather than stuck at the rim.
+    const FIT_EPS = 1.05;
+    const clampTx = (tx: number, s: number) => {
       'worklet';
-      savedScale.value = scale.value;
-      savedTx.value = translateX.value;
-      savedTy.value = translateY.value;
-      focalX0.value = e.focalX;
-      focalY0.value = e.focalY;
-    })
-    .onChange(e => {
+      if (s <= fitScale.value * FIT_EPS) return fitTx.value;
+      const cMin = bMinX.value * s;
+      const cMax = bMaxX.value * s;
+      const viewLen = widthSV.value;
+      return Math.min(viewLen / 2 - cMin, Math.max(viewLen / 2 - cMax, tx));
+    };
+    const clampTy = (ty: number, s: number) => {
       'worklet';
-      // Clamp scale
-      const s = Math.min(MAX_SCALE, Math.max(MIN_SCALE, savedScale.value * e.scale));
-      scale.value = s;
-      const ratio = s / savedScale.value;
-      // Keep the initial focal world-point fixed under the current focal screen position.
-      // With transformOrigin '0% 0%': screen = world * scale + translate
-      translateX.value = e.focalX - (focalX0.value - savedTx.value) * ratio;
-      translateY.value = e.focalY - (focalY0.value - savedTy.value) * ratio;
-    });
+      if (s <= fitScale.value * FIT_EPS) return fitTy.value;
+      const cMin = bMinY.value * s;
+      const cMax = bMaxY.value * s;
+      const viewLen = canvasHSV.value;
+      return Math.min(viewLen / 2 - cMin, Math.max(viewLen / 2 - cMax, ty));
+    };
 
-  const doubleTap = Gesture.Tap()
-    .numberOfTaps(2)
-    .onEnd(() => {
-      'worklet';
-      scale.value = withSpring(1, { damping: 20, stiffness: 200 });
-      translateX.value = withSpring(0, { damping: 20, stiffness: 200 });
-      translateY.value = withSpring(0, { damping: 20, stiffness: 200 });
-    });
+    const pan = Gesture.Pan()
+      .maxPointers(1)
+      .onStart(() => {
+        'worklet';
+        savedTx.value = translateX.value;
+        savedTy.value = translateY.value;
+      })
+      .onChange(e => {
+        'worklet';
+        translateX.value = clampTx(savedTx.value + e.translationX, scale.value);
+        translateY.value = clampTy(savedTy.value + e.translationY, scale.value);
+      });
 
-  const gesture = Gesture.Simultaneous(doubleTap, panGesture, pinchGesture);
+    const pinch = Gesture.Pinch()
+      .onStart(e => {
+        'worklet';
+        savedScale.value = scale.value;
+        savedTx.value = translateX.value;
+        savedTy.value = translateY.value;
+        focalX0.value = e.focalX;
+        focalY0.value = e.focalY;
+      })
+      .onChange(e => {
+        'worklet';
+        // Fit scale is the floor: you can't zoom out past "everything visible".
+        const s = Math.min(MAX_SCALE, Math.max(fitScale.value, savedScale.value * e.scale));
+        scale.value = s;
+        const ratio = s / savedScale.value;
+        // Keep the focal world-point fixed under the focal screen point.
+        // transformOrigin is top-left: screen = world * scale + translate.
+        translateX.value = clampTx(e.focalX - (focalX0.value - savedTx.value) * ratio, s);
+        translateY.value = clampTy(e.focalY - (focalY0.value - savedTy.value) * ratio, s);
+      });
+
+    const dtap = Gesture.Tap()
+      .numberOfTaps(2)
+      .onEnd(() => {
+        'worklet';
+        scale.value = withSpring(fitScale.value, { damping: 20, stiffness: 200 });
+        translateX.value = withSpring(fitTx.value, { damping: 20, stiffness: 200 });
+        translateY.value = withSpring(fitTy.value, { damping: 20, stiffness: 200 });
+      });
+
+    const stap = Gesture.Tap()
+      .numberOfTaps(1)
+      .onEnd((e, success) => {
+        'worklet';
+        if (success) runOnJS(callTap)(e.x, e.y);
+      });
+
+    return Gesture.Simultaneous(Gesture.Exclusive(dtap, stap), pan, pinch);
+  }, []);
+
+  // Latest tap implementation — reassigned every render so it always sees the
+  // current node set and selectNode, while `gesture` itself stays stable.
+  tapRef.current = (screenX: number, screenY: number) => {
+    const canvasX = (screenX - translateX.value) / scale.value;
+    const canvasY = (screenY - translateY.value) / scale.value;
+    const HIT_R = 20;
+    let closest: LayoutNode | null = null;
+    let minDist = HIT_R;
+    for (const node of nodes) {
+      const dx = node.x - canvasX;
+      const dy = node.y - canvasY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < minDist) { minDist = dist; closest = node; }
+    }
+    if (closest) selectNode(closest.slug, closest.title);
+  };
 
   const animatedStyle = useAnimatedStyle(() => ({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -236,6 +345,14 @@ export default function GraphScreen() {
       { scale: scale.value },
     ] as any,
   }));
+
+  // Fade the legend out as you zoom in so it stops obscuring nodes — fully
+  // visible at the fit scale, gone by ~1.6× fit.
+  const legendStyle = useAnimatedStyle(() => {
+    const f = fitScale.value || 1;
+    const o = 1 - (scale.value - f) / (f * 0.6);
+    return { opacity: Math.max(0, Math.min(1, o)) };
+  });
 
   // ── Data fetch — only re-runs when the entry or mode changes, not on rotation.
   useEffect(() => {
@@ -347,11 +464,50 @@ export default function GraphScreen() {
   const open = (slug: string, title: string) =>
     nav.push('Article', { slug, title });
 
+  // Find the sentence in `html` that contains a link to `linkSlug`.
+  const findLinkSentence = (html: string, linkSlug: string): string | null => {
+    const linkRe = new RegExp(`[^.!?]*<a [^>]*href=["'][^"']*\\/entries\\/${linkSlug}\\/[^"']*["'][^>]*>[^<]*<\\/a>[^.!?]*[.!?]?`, 'i');
+    const m = html.match(linkRe);
+    if (!m) return null;
+    // Strip all HTML tags, decode common entities, normalise whitespace
+    const decoded = m[0]
+      .replace(/<[^>]+>/g, '')
+      .replace(/&(?:ldquo|rdquo);/g, '"')
+      .replace(/&(?:lsquo|rsquo|squo);/g, "’")
+      .replace(/&(?:mdash|ndash);/g, '—')
+      .replace(/&hellip;/g, '…')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+      .replace(/^[\s"'‘’“”.,;:]+/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return decoded.slice(0, 480) || null;
+  };
+
   const selectNode = (slug: string, title: string) => {
     setSelected({ slug, title });
     setPreview(null);
-    getEntryPreview(slug).then(p => {
-      if (p) setPreview({ author: p.author, excerpt: p.excerpt });
+    const wantContext = !!centerSlug && mode === 'links' && slug !== centerSlug;
+    Promise.all([
+      getEntryPreview(slug),
+      getEntry(slug),
+      wantContext ? getEntry(centerSlug) : Promise.resolve(null),
+    ]).then(([p, target, center]) => {
+      const targetHtml = target?.content_html ?? null;
+      // Reference sentence: prefer the outgoing link in the center article, then
+      // fall back to a backlink to the center inside the target article.
+      const context = wantContext
+        ? (center?.content_html ? findLinkSentence(center.content_html, slug) : null)
+          ?? (targetHtml ? findLinkSentence(targetHtml, centerSlug) : null)
+        : null;
+      // Pull a generous, on-the-fly excerpt straight from the cached body so the
+      // card shows real article content — not the short stored teaser.
+      const excerpt = targetHtml ? makeExcerpt(targetHtml, 1200) : (p?.excerpt ?? null);
+      setPreview({ author: p?.author ?? null, excerpt, context });
     });
   };
 
@@ -365,13 +521,9 @@ export default function GraphScreen() {
     return title + (mode === 'timeline' ? yr : '');
   };
 
-  const showLabel = (node: LayoutNode): boolean => {
-    const isCenter = node.slug === centerSlug;
-    if (labelMode === 'none') return false;
-    if (!node.read && !isCenter && mode !== 'timeline') return false;
-    if (labelMode === 'partial') return isCenter || !!node.read || mode === 'timeline';
-    return true; // 'all' | 'full'
-  };
+  // Labels are shown at every zoom level except fully zoomed-out, where they
+  // would be illegibly small and overlap. The user wants every name visible.
+  const showLabels = labelMode !== 'none';
 
   const labelColor = (node: LayoutNode): string => {
     if (node.slug === centerSlug) return '#5b8ef5';
@@ -534,10 +686,7 @@ export default function GraphScreen() {
                   const ly = isTimeline ? node.y + 3 : node.y + r + 12;
                   const anchor = isTimeline ? (laneLeft ? 'end' : 'start') : 'middle';
                   return (
-                    <G
-                      key={node.slug}
-                      onPress={() => selectNode(node.slug, node.title)}
-                    >
+                    <G key={node.slug}>
                       <Circle
                         cx={node.x} cy={node.y}
                         r={r + 8}
@@ -550,17 +699,32 @@ export default function GraphScreen() {
                         stroke={stroke}
                         strokeWidth={isVisited ? 1.5 : 1}
                       />
-                      {showLabel(node) && (
-                        <SvgText
-                          x={lx}
-                          y={ly}
-                          textAnchor={anchor}
-                          fontSize={9}
-                          fill={labelColor(node)}
-                        >
-                          {getLabel(node)}
-                        </SvgText>
-                      )}
+                      {showLabels && (() => {
+                        const label = getLabel(node);
+                        // Two-pass halo: a dark stroked copy underneath, colour on
+                        // top. react-native-svg ignores paint-order, so we layer the
+                        // two SvgText nodes explicitly to keep labels legible over
+                        // edges and neighbouring labels.
+                        return (
+                          <>
+                            <SvgText
+                              x={lx} y={ly} textAnchor={anchor}
+                              fontSize={9}
+                              fill="none" stroke="#111111" strokeWidth={2.5}
+                              strokeLinejoin="round"
+                            >
+                              {label}
+                            </SvgText>
+                            <SvgText
+                              x={lx} y={ly} textAnchor={anchor}
+                              fontSize={9}
+                              fill={labelColor(node)}
+                            >
+                              {label}
+                            </SvgText>
+                          </>
+                        );
+                      })()}
                     </G>
                   );
                 })}
@@ -569,8 +733,11 @@ export default function GraphScreen() {
           </GestureDetector>
         )}
 
-        {/* ── Legend ── */}
-        <View style={[styles.legend, { bottom: insets.bottom + 12 }]}>
+        {/* ── Legend (fades out as you zoom in; never blocks node taps) ── */}
+        <Reanimated.View
+          pointerEvents="none"
+          style={[styles.legend, { bottom: insets.bottom + 12 }, legendStyle]}
+        >
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: '#5b8ef5' }]} />
             <Text style={styles.legendLabel}>This entry</Text>
@@ -589,7 +756,7 @@ export default function GraphScreen() {
               <Text style={styles.legendLabel}>Unvisited</Text>
             </View>
           )}
-        </View>
+        </Reanimated.View>
 
         {/* ── Zoom hint ── */}
         <View style={styles.zoomHint} pointerEvents="none">
@@ -610,11 +777,21 @@ export default function GraphScreen() {
             {preview?.author ? (
               <Text style={styles.previewAuthor} numberOfLines={1}>{preview.author}</Text>
             ) : null}
-            {preview?.excerpt ? (
-              <Text style={styles.previewExcerpt} numberOfLines={3}>{preview.excerpt}</Text>
-            ) : (
-              <Text style={styles.previewExcerpt}>Not yet downloaded — open to read.</Text>
-            )}
+            <ScrollView
+              style={styles.previewScroll}
+              contentContainerStyle={styles.previewScrollContent}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+            >
+              {preview?.context ? (
+                <Text style={styles.previewContext}>{preview.context}</Text>
+              ) : null}
+              {preview?.excerpt ? (
+                <Text style={styles.previewExcerpt}>{preview.excerpt}</Text>
+              ) : (
+                <Text style={styles.previewExcerpt}>Not yet downloaded — open to read.</Text>
+              )}
+            </ScrollView>
             <TouchableOpacity
               style={styles.previewBtn}
               onPress={() => { const s = selected; setSelected(null); setPreview(null); open(s.slug, s.title); }}
@@ -680,7 +857,10 @@ const styles = StyleSheet.create({
   modeChipTextActive: { color: '#5b8ef5' },
 
   canvas: { flex: 1, overflow: 'hidden', position: 'relative' },
-  canvasInner: { flex: 1 },
+  // transformOrigin top-left so scale pivots at (0,0): screen = world*scale + translate.
+  // RN's default centre origin made pinch-zoom jump the content; this matches the
+  // focal math in the pinch gesture and the inverse in the tap hit-test.
+  canvasInner: { flex: 1, transformOrigin: 'left top' },
 
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingLabel: { color: '#444', fontSize: 13 },
@@ -730,7 +910,14 @@ const styles = StyleSheet.create({
   },
   previewTitle: { color: '#e4e4e4', fontSize: 17, fontWeight: '700', lineHeight: 22 },
   previewAuthor: { color: '#555', fontSize: 12, marginTop: 4 },
+  previewContext: {
+    color: '#7a7a8a', fontSize: 12, lineHeight: 18, marginTop: 10,
+    fontStyle: 'italic',
+    borderLeftWidth: 2, borderLeftColor: '#2e2e3e', paddingLeft: 10,
+  },
   previewExcerpt: { color: '#9a9a9a', fontSize: 13, lineHeight: 19, marginTop: 8 },
+  previewScroll: { maxHeight: 300 },
+  previewScrollContent: { paddingBottom: 2 },
   previewBtn: {
     alignSelf: 'flex-start',
     marginTop: 14,

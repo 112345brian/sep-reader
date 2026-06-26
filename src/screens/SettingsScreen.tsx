@@ -39,6 +39,7 @@ export default function SettingsScreen() {
   const [dlAbort, setDlAbort] = useState<AbortController | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [autoSync, setAutoSync] = useState<string>('off');
+  const [linkPreview, setLinkPreview] = useState(true);
 
   useFocusEffect(useCallback(() => {
     getPrefs().then(setPrefs);
@@ -50,6 +51,7 @@ export default function SettingsScreen() {
     getMeta('custom_css').then(v => setCustomCss(v ?? ''));
     getMeta('font_size').then(v => setFontSize(v ? parseInt(v, 10) : 17));
     getMeta('auto_sync').then(v => setAutoSync(v ?? 'off'));
+    getMeta('link_preview').then(v => setLinkPreview(v !== '0'));
     loadCounts();
   }, []));
 
@@ -63,6 +65,12 @@ export default function SettingsScreen() {
     const next = { ...prefs, [key]: value };
     setPrefs(next);
     await savePrefs(next);
+  }
+
+  function toggleLinkPreview() {
+    const next = !linkPreview;
+    setLinkPreview(next);
+    setMeta('link_preview', next ? '1' : '0').catch(() => {});
   }
 
   async function saveCustomCss() {
@@ -224,6 +232,7 @@ export default function SettingsScreen() {
 
         {/* Reading */}
         <Section title="Reading">
+          <OptionRow label="Preview links before opening" selected={linkPreview} onPress={toggleLinkPreview} />
           <View style={styles.row}>
             <Text style={styles.rowLabel}>Font size</Text>
             <View style={styles.fontSizePicker}>

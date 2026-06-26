@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator, InteractionManager,
-  TouchableOpacity, Share, Linking, Pressable, Animated,
+  TouchableOpacity, Share, Linking, Pressable, Animated, ScrollView,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -12,10 +12,11 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import {
-  getEntry, recordRead, toggleBookmark, isBookmarked,
+  getEntry, getEntryPreview, recordRead, toggleBookmark, isBookmarked,
   saveAnnotation, updateAnnotation, deleteAnnotation, getAnnotationsForSlug,
   getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs, getMathSvgMap,
 } from '../services/db';
+import { makeExcerpt } from '../utils/excerpt';
 import { fetchAndCacheArticle } from '../services/catalog';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
@@ -208,6 +209,9 @@ export default function ArticleScreen() {
   const [showOverflow, setShowOverflow] = useState(false);
   const [footnote, setFootnote] = useState<{ inlines: Inline[] } | null>(null);
   const [backlinkCount, setBacklinkCount] = useState(0);
+  const [linkPreview, setLinkPreview] = useState<
+    { slug: string; title: string; author: string | null; excerpt: string | null } | null
+  >(null);
 
   // Native-renderer AST — deferred past the navigation animation. SVGs are
   // already baked into content_html at fetch time, so parse is pure and fast.
@@ -475,6 +479,25 @@ export default function ArticleScreen() {
   // Link handling for the native renderer. Mirrors the WebView's handleNav so
   // cross-article, in-page anchor, and external links behave the same regardless
   // of USE_NATIVE_RENDERER.
+  const navToEntry = useCallback((target: string) => {
+    nav.push('Article', { slug: target, title: target, fromSlug: slug });
+  }, [nav, slug]);
+
+  // Open a cross-reference. When the link-preview setting is on (default), show a
+  // peek card (author + excerpt) first; otherwise navigate straight there.
+  const goToEntry = useCallback(async (target: string) => {
+    const enabled = (await getMeta('link_preview')) !== '0'; // default ON
+    if (!enabled) { navToEntry(target); return; }
+    const [prev, entry] = await Promise.all([getEntryPreview(target), getEntry(target)]);
+    const html = entry?.content_html ?? null;
+    setLinkPreview({
+      slug: target,
+      title: prev?.title ?? target,
+      author: prev?.author ?? null,
+      excerpt: html ? makeExcerpt(html, 1200) : (prev?.excerpt ?? null),
+    });
+  }, [navToEntry]);
+
   const handleNativeLink = useCallback((href: string) => {
     if (!href) return;
     // In-page anchor (#section, bibliography back-ref) → scroll within the article.
@@ -486,7 +509,7 @@ export default function ArticleScreen() {
     const sepEntry = href.match(/(?:\/entries\/|^\.\.\/)([a-z0-9-]+)\//);
     if (sepEntry) {
       const target = sepEntry[1];
-      if (target !== slug) nav.push('Article', { slug: target, title: target, fromSlug: slug });
+      if (target !== slug) goToEntry(target);
       else nativeArticleRef.current?.scrollToSection(href.replace(/^[^#]*#?/, ''));
       return;
     }
@@ -495,12 +518,12 @@ export default function ArticleScreen() {
     if (slugHtml) {
       const target = slugHtml[1];
       if (!/^(supplement|figdesc|appendix|notes)/.test(target) && target !== slug)
-        nav.push('Article', { slug: target, title: target, fromSlug: slug });
+        goToEntry(target);
       return;
     }
     // Everything else external → open in the system browser.
     if (href.startsWith('http')) Linking.openURL(href).catch(() => {});
-  }, [slug, nav]);
+  }, [slug, goToEntry]);
 
   const displayTitle = state.phase === 'ready' ? state.entry.title : title;
 
@@ -769,6 +792,36 @@ export default function ArticleScreen() {
         </Pressable>
       )}
 
+      {/* ── Link preview peek card ── */}
+      {linkPreview && (
+        <>
+          <Pressable style={styles.lpBackdrop} onPress={() => setLinkPreview(null)} />
+          <View style={[styles.lpCard, { bottom: insets.bottom + 28 }]}>
+            <Text style={styles.lpTitle} numberOfLines={2}>{linkPreview.title}</Text>
+            {linkPreview.author ? (
+              <Text style={styles.lpAuthor} numberOfLines={1}>{linkPreview.author}</Text>
+            ) : null}
+            <ScrollView
+              style={styles.lpScroll}
+              contentContainerStyle={styles.lpScrollContent}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+            >
+              <Text style={styles.lpExcerpt}>
+                {linkPreview.excerpt ?? 'Not yet downloaded — open to read.'}
+              </Text>
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.lpBtn}
+              onPress={() => { const t = linkPreview.slug; setLinkPreview(null); navToEntry(t); }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.lpBtnText}>Open article →</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+
       <AnnotationModal
         annotation={modalAnnotation}
         onSave={handleModalSave}
@@ -785,6 +838,28 @@ export default function ArticleScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#111' },
+
+  // ── Link preview peek card ──
+  lpBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)', zIndex: 200 },
+  lpCard: {
+    position: 'absolute', left: 16, right: 16, zIndex: 201,
+    backgroundColor: '#1c1c1c', borderRadius: 12,
+    borderWidth: 1, borderColor: '#2e2e2e', padding: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5, shadowRadius: 16, elevation: 12,
+  },
+  lpTitle: { color: '#e4e4e4', fontSize: 17, fontWeight: '700', lineHeight: 22 },
+  lpAuthor: { color: '#555', fontSize: 12, marginTop: 4 },
+  lpScroll: { maxHeight: 300, marginTop: 10 },
+  lpScrollContent: { paddingBottom: 2 },
+  lpExcerpt: { color: '#9a9a9a', fontSize: 13, lineHeight: 19 },
+  lpBtn: {
+    alignSelf: 'flex-start', marginTop: 14,
+    paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8,
+    backgroundColor: 'rgba(91,142,245,0.14)',
+    borderWidth: 1, borderColor: 'rgba(91,142,245,0.35)',
+  },
+  lpBtnText: { color: '#5b8ef5', fontSize: 14, fontWeight: '600' },
 
   appBar: {
     flexDirection: 'row',
