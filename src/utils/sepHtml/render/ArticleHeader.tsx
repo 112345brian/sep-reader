@@ -12,12 +12,13 @@ interface Props {
   // revision …"). Rendered muted under the title. Empty/absent → no preamble.
   preambleHtml?: string | null;
   onLinkPress?: (href: string, wl: boolean) => void;
+  onFootnotePress?: (href: string, label: string) => void;
 }
 
 // Native equivalent of the WebView's h1.pagetitle + .entry-breadcrumb +
 // #preamble chrome. Scrolls with the article body (it's rendered inside the
 // SepArticle ScrollView via the `header` prop), so the title recedes as you read.
-export function ArticleHeader({ title, parentLabel, preambleHtml, onLinkPress }: Props) {
+export function ArticleHeader({ title, parentLabel, preambleHtml, onLinkPress, onFootnotePress }: Props) {
   const preamble = useMemo(() => {
     if (!preambleHtml || !preambleHtml.trim()) return null;
     // Strip the <h1> (rendered separately as the title) and neutralize the
@@ -30,8 +31,8 @@ export function ArticleHeader({ title, parentLabel, preambleHtml, onLinkPress }:
     return parsed.blocks.length ? parsed : null;
   }, [preambleHtml]);
   const handlers: BlockHandlers = useMemo(
-    () => ({ onLinkPress, textStyle: sepHeader.preambleText }),
-    [onLinkPress]
+    () => ({ onLinkPress, onFootnotePress, textStyle: sepHeader.preambleText }),
+    [onLinkPress, onFootnotePress]
   );
 
   return (

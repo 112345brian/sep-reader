@@ -521,6 +521,14 @@ export default function ArticleScreen() {
     });
   }, [navToEntry]);
 
+  // Footnote tap — resolve the note from the parsed body or the notes.html map
+  // and show it in the sheet. Shared by the body and the preamble (header).
+  const handleFootnotePress = useCallback((fnHref: string) => {
+    const id = fnHref.startsWith('#') ? fnHref.slice(1) : fnHref;
+    const inlines = nativeArticle?.footnotes[id] ?? noteFootnotes[id];
+    if (inlines && inlines.length) setFootnote({ inlines });
+  }, [nativeArticle, noteFootnotes]);
+
   const handleNativeLink = useCallback((href: string) => {
     if (!href) return;
     // In-page anchor (#section, bibliography back-ref) → scroll within the article.
@@ -721,6 +729,7 @@ export default function ArticleScreen() {
                       parentLabel={state.entry.parent_label}
                       preambleHtml={state.entry.preamble_html}
                       onLinkPress={handleNativeLink}
+                      onFootnotePress={handleFootnotePress}
                     />
                     {state.entry.toc_html ? (
                       <ArticleToc
@@ -731,11 +740,7 @@ export default function ArticleScreen() {
                   </View>
                 }
                 onLinkPress={handleNativeLink}
-                onFootnotePress={(fnHref) => {
-                  const id = fnHref.startsWith('#') ? fnHref.slice(1) : fnHref;
-                  const inlines = nativeArticle.footnotes[id] ?? noteFootnotes[id];
-                  if (inlines && inlines.length) setFootnote({ inlines });
-                }}
+                onFootnotePress={handleFootnotePress}
                 onProgress={(v) => setReadProgress(slug, v).catch(() => {})}
                 resolveImageSrc={(src) => {
                   if (src.startsWith('http')) return src;

@@ -24,7 +24,7 @@ export interface Highlight {
 }
 
 const linkStyle = { color: SEP_COLORS.accent, textDecorationLine: 'underline' as const };
-const fnStyle = { color: SEP_COLORS.accent, fontSize: sepText.body.fontSize! * 0.8 };
+const fnStyle = { color: SEP_COLORS.accent, fontSize: sepText.body.fontSize! * 0.85 };
 
 // Footnote marker. The glyph stays small and unobtrusive, but RN cannot
 // put hitSlop/padding on inline text, so we widen the touch target by
