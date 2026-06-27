@@ -1,4 +1,4 @@
-import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntry, putMath, getMathSvgMap } from './db';
+import { upsertIndexEntries, cacheArticle, getMeta, setMeta, getEntryCount, getSlugsByCacheStatus, getCachedSlugs, indexLinks, getAllEntryTitles, invalidateLinkCache, cleanDenormalizedTitles, getMathArticleHtml, updateArticleHtml, setArticleAst, getUncachedAstSlugs, getEntry, putMath, getMathSvgMap, setEntryNotes } from './db';
 import { linkifyHtml } from '../utils/linkifier';
 import seedEntries from '../assets/entry-seed.json';
 import { renderMathBatch } from './mathRender';
@@ -281,6 +281,9 @@ export async function fetchAndCacheArticle(slug: string, opts: { skipMath?: bool
     const hasMath = linkedHtml.includes('\\(') || linkedHtml.includes('\\[');
     // Substitute math unless caller opted out (bulk download defers to backfillMathInline).
     const finalHtml = hasMath && !opts.skipMath ? await substitutemath(linkedHtml) : linkedHtml;
+    // Footnote text lives on a sibling notes.html page; fetch it so footnotes
+    // resolve offline. Only when the body actually references it.
+    const notesHtml = /notes\.html#note/i.test(finalHtml) ? await fetchNotesHtml(slug) : null;
     // Pre-parse the AST so ArticleScreen can JSON.parse instead of re-parsing HTML.
     const content_ast = JSON.stringify(parseSepHtml(finalHtml));
     await cacheArticle(slug, {
@@ -289,6 +292,7 @@ export async function fetchAndCacheArticle(slug: string, opts: { skipMath?: bool
       toc_html: tocHtml,
       preamble_html: preambleHtml,
       content_html: finalHtml,
+      notes_html: notesHtml,
       content_ast,
       has_math: hasMath ? 1 : 0,
     });
@@ -350,6 +354,36 @@ async function fetchEntryList(): Promise<{ slug: string; title: string; parent_l
 }
 
 // ── HTML extraction ──────────────────────────────────────────────────────────
+
+// SEP keeps footnote text on a sibling notes.html page. Fetch it and return the
+// article-content container, so the renderer can resolve footnote refs offline.
+async function fetchNotesHtml(slug: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/entries/${slug}/notes.html`, { headers: SEP_HEADERS, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) return null;
+    const html = await res.text();
+    return extractById(html, 'aueditable') || extractById(html, 'article-content') || null;
+  } catch {
+    return null;
+  }
+}
+
+// Lazy backfill for an already-cached article: if its body references footnotes
+// but the notes page wasn't stored (downloaded before this feature), fetch and
+// persist it. Returns the notes HTML, or null when there are no footnotes.
+export async function ensureNotesCached(slug: string, contentHtml: string | null): Promise<string | null> {
+  if (!contentHtml || !/notes\.html#note/i.test(contentHtml)) return null;
+  const notes = await fetchNotesHtml(slug);
+  if (notes) await setEntryNotes(slug, notes);
+  return notes;
+}
 
 function extractById(html: string, id: string): string | null {
   const start = new RegExp(`<(div|nav|section|ol|ul)[^>]*\\bid="${id}"[^>]*>`, 'i');

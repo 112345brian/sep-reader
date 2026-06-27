@@ -24,7 +24,31 @@ export interface Highlight {
 }
 
 const linkStyle = { color: SEP_COLORS.accent, textDecorationLine: 'underline' as const };
-const fnStyle = { color: SEP_COLORS.accent, fontSize: sepText.body.fontSize! * 0.75 };
+const fnStyle = { color: SEP_COLORS.accent, fontSize: sepText.body.fontSize! * 0.8 };
+
+// Footnote marker. The glyph stays small and unobtrusive, but RN cannot
+// put hitSlop/padding on inline text, so we widen the touch target by
+// padding the pressable run with spaces (the inline code chip uses the
+// same trick). A hair-space leads so the marker still hugs the preceding
+// word; a single en-space trails into the gap that already follows it.
+const FN_PAD_LEAD = '\u200A';   // hair space (~1px) — keeps the marker hugging the word
+const FN_PAD_TRAIL = '\u2002'; // one en-space — widens the tap zone where a word gap already exists
+function renderFootnote(
+  node: Extract<Inline, { t: 'fnref' }>,
+  h: InlineHandlers,
+  key: string,
+  extra?: object,
+) {
+  return (
+    <Text
+      key={key}
+      style={extra ? { ...extra, ...fnStyle } : fnStyle}
+      onPress={() => h.onFootnotePress?.(node.href, node.label)}
+    >
+      {FN_PAD_LEAD}{node.label}{FN_PAD_TRAIL}
+    </Text>
+  );
+}
 // Inline code chip — mirrors readerCss `code { background; border-radius; … }`.
 // RN can't pad inline text, so hair-spaces fake the horizontal breathing room.
 const codeStyle = {
@@ -90,11 +114,7 @@ function renderTextRuns(inlines: Inline[], h: InlineHandlers, key = 'i'): React.
           </Text>
         );
       case 'fnref':
-        return (
-          <Text key={k} style={fnStyle} onPress={() => h.onFootnotePress?.(node.href, node.label)}>
-            {node.label}
-          </Text>
-        );
+        return renderFootnote(node, h, k);
       case 'sup':
         return <Text key={k} style={scriptStyle}>{renderTextRuns(node.children, h, k)}</Text>;
       case 'sub':
@@ -186,11 +206,7 @@ function renderHighlightedRuns(
         return <Text key={k} style={codeStyle}>{` ${node.v} `}</Text>;
       }
       case 'fnref':
-        return (
-          <Text key={k} style={fnStyle} onPress={() => h.onFootnotePress?.(node.href, node.label)}>
-            {node.label}
-          </Text>
-        );
+        return renderFootnote(node, h, k);
       default:
         return null;
     }
@@ -244,7 +260,7 @@ function flattenToTokens(inlines: Inline[], h: InlineHandlers, style: object, ou
       const ns = { ...style, fontSize: (style as any).fontSize! * 0.75 };
       flattenToTokens(node.children, h, ns, out, keyRef);
     } else if (node.t === 'fnref') {
-      out.push(<Text key={`f${keyRef.n++}`} style={{ ...style, ...fnStyle }} onPress={() => h.onFootnotePress?.(node.href, node.label)}>{node.label}</Text>);
+      out.push(renderFootnote(node, h, `f${keyRef.n++}`, style));
     } else if (node.t === 'code') {
       out.push(<Text key={`c${keyRef.n++}`} style={{ ...style, ...codeStyle }}>{` ${node.v} `}</Text>);
     }

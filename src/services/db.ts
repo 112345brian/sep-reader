@@ -36,6 +36,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       toc_html     TEXT,
       preamble_html TEXT,
       content_html TEXT,
+      notes_html   TEXT,
       word_count   INTEGER DEFAULT 0,
       read_progress REAL DEFAULT 0,
       excerpt      TEXT,
@@ -122,6 +123,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     db.runAsync("ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'sep'").catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN has_math INTEGER DEFAULT 0').catch(() => {}),
     db.runAsync('ALTER TABLE entries ADD COLUMN content_ast TEXT').catch(() => {}),
+    db.runAsync('ALTER TABLE entries ADD COLUMN notes_html TEXT').catch(() => {}),
   ]);
 
   // One-time migration: clear articles cached before preamble_html column existed
@@ -136,6 +138,22 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     );
     await db.runAsync(
       `INSERT OR REPLACE INTO meta (key, value) VALUES ('migrated_clear_cache_v2', '1')`
+    );
+  }
+
+  // Parser version: bump when the native HTML parser changes the stored AST in a
+  // user-visible way (e.g. bracket-free footnote refs → fnref). Clearing
+  // content_ast forces cached articles to re-parse with the current parser on
+  // next open, rather than rendering a stale AST frozen at download time.
+  const PARSER_VERSION = '2';
+  const astVer = await db.getFirstAsync<{ value: string }>(
+    `SELECT value FROM meta WHERE key = 'ast_parser_version'`
+  );
+  if (astVer?.value !== PARSER_VERSION) {
+    await db.runAsync('UPDATE entries SET content_ast = NULL');
+    await db.runAsync(
+      `INSERT OR REPLACE INTO meta (key, value) VALUES ('ast_parser_version', ?)`,
+      [PARSER_VERSION]
     );
   }
 
@@ -273,7 +291,7 @@ export async function getUncachedAstSlugs(): Promise<string[]> {
 
 export async function cacheArticle(
   slug: string,
-  data: Pick<EntryRow, 'author' | 'pub_date' | 'toc_html' | 'preamble_html' | 'content_html' | 'content_ast' | 'has_math'>
+  data: Pick<EntryRow, 'author' | 'pub_date' | 'toc_html' | 'preamble_html' | 'content_html' | 'content_ast' | 'has_math'> & { notes_html?: string | null }
 ): Promise<void> {
   const db = await getDb();
   const wordCount = countWords(data.content_html ?? '');
@@ -296,11 +314,11 @@ export async function cacheArticle(
     `UPDATE entries SET
        author = ?, pub_date = ?, content_hash = ?,
        toc_html = ?, preamble_html = ?,
-       content_html = ?, content_ast = ?, has_math = ?, word_count = ?, excerpt = ?, cached_at = ?
+       content_html = ?, notes_html = ?, content_ast = ?, has_math = ?, word_count = ?, excerpt = ?, cached_at = ?
      WHERE slug = ?`,
     [data.author ?? null, data.pub_date ?? null, hash,
      data.toc_html ?? null, data.preamble_html ?? null,
-     data.content_html ?? null, data.content_ast ?? null, data.has_math ? 1 : 0, wordCount, excerpt, now, slug]
+     data.content_html ?? null, data.notes_html ?? null, data.content_ast ?? null, data.has_math ? 1 : 0, wordCount, excerpt, now, slug]
   );
 
   // Record the new version
@@ -308,6 +326,13 @@ export async function cacheArticle(
     'INSERT OR IGNORE INTO article_versions (slug, content_hash, cached_at) VALUES (?, ?, ?)',
     [slug, hash, now]
   );
+}
+
+// Persist footnote-page HTML for an already-cached article (lazy backfill for
+// entries that were downloaded before notes were stored).
+export async function setEntryNotes(slug: string, notesHtml: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE entries SET notes_html = ? WHERE slug = ?', [notesHtml, slug]);
 }
 
 export async function getArticleVersionDate(slug: string, hash: string): Promise<number | null> {

@@ -17,7 +17,7 @@ import {
   getMeta, setReadProgress, getLinksTo, indexLinks, getRecentSlugs, getMathSvgMap,
 } from '../services/db';
 import { makeExcerpt } from '../utils/excerpt';
-import { fetchAndCacheArticle } from '../services/catalog';
+import { fetchAndCacheArticle, ensureNotesCached } from '../services/catalog';
 import { primeBackfillForSlugs, primeGraphLayouts } from '../services/inpho';
 import { buildArticleHtml } from '../utils/articleTemplate';
 import { parseSepHtml } from '../utils/sepHtml/parse';
@@ -216,6 +216,10 @@ export default function ArticleScreen() {
   // Native-renderer AST — deferred past the navigation animation. SVGs are
   // already baked into content_html at fetch time, so parse is pure and fast.
   const [nativeArticle, setNativeArticle] = useState<ReturnType<typeof parseSepHtml> | null>(null);
+  // Footnote definitions, resolved from the sibling notes.html page (which the
+  // body doesn't include). Kept separate from the parsed article so onFootnotePress
+  // can fall back to it without re-parsing the body.
+  const [noteFootnotes, setNoteFootnotes] = useState<Record<string, Inline[]>>({});
   const [mathSvgs, setMathSvgs] = useState<Record<string, string>>({});
   // After the AST is ready, load math SVGs from the DB in one batch query.
   // mathref nodes show invisible placeholders until this resolves (~1 DB query).
@@ -255,6 +259,25 @@ export default function ArticleScreen() {
     setTimeout(() => {
       if (!cancelled) setNativeArticle(parseSepHtml(html));
     }, 0);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [astKey]);
+
+  // Resolve footnote text from notes.html. Uses the stored notes_html when
+  // present; otherwise lazily fetches + persists it (for articles cached before
+  // notes were saved), so tapping a footnote marker actually shows the note.
+  useEffect(() => {
+    setNoteFootnotes({});
+    if (!readyEntry) return;
+    const content = readyEntry.content_html ?? '';
+    if (!/notes\.html#note/i.test(content)) return;
+    let cancelled = false;
+    (async () => {
+      const notes = readyEntry.notes_html ?? await ensureNotesCached(readyEntry.slug, content);
+      if (cancelled || !notes) return;
+      const fn = parseSepHtml(notes).footnotes;
+      if (!cancelled && Object.keys(fn).length) setNoteFootnotes(fn);
+    })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [astKey]);
@@ -710,7 +733,7 @@ export default function ArticleScreen() {
                 onLinkPress={handleNativeLink}
                 onFootnotePress={(fnHref) => {
                   const id = fnHref.startsWith('#') ? fnHref.slice(1) : fnHref;
-                  const inlines = nativeArticle.footnotes[id];
+                  const inlines = nativeArticle.footnotes[id] ?? noteFootnotes[id];
                   if (inlines && inlines.length) setFootnote({ inlines });
                 }}
                 onProgress={(v) => setReadProgress(slug, v).catch(() => {})}
