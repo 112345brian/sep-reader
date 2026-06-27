@@ -24,10 +24,10 @@ import { parseSepHtml } from '../utils/sepHtml/parse';
 import { collectMathHashes } from '../utils/sepHtml/collectMathHashes';
 import { SepArticle, type SepArticleHandle } from '../utils/sepHtml/render/SepArticle';
 import { ArticleHeader } from '../utils/sepHtml/render/ArticleHeader';
-import { InlineContent } from '../utils/sepHtml/render/Inline';
 import type { Inline } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet, { TOC_SHEET_H } from '../components/TocSheet';
+import FootnoteSheet from '../components/FootnoteSheet';
 import { parseToc } from '../utils/parseToc';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
 import type { EntryRow, Annotation } from '../types';
@@ -804,15 +804,9 @@ export default function ArticleScreen() {
         </>
       )}
 
-      {/* ── Footnote popup ── */}
+      {/* ── Footnote sheet — slides up in the TOC-modal style ── */}
       {footnote && (
-        <Pressable style={styles.fnScrim} onPress={() => setFootnote(null)}>
-          <View style={[styles.fnSheet, { paddingBottom: insets.bottom + 16 }]}>
-            <View style={styles.fnHandle} />
-            <Text style={styles.fnLabel}>NOTE</Text>
-            <InlineContent inlines={footnote.inlines} handlers={{}} baseStyle={styles.fnText} />
-          </View>
-        </Pressable>
+        <FootnoteSheet inlines={footnote.inlines} onClose={() => setFootnote(null)} />
       )}
 
       {/* ── Link preview peek card ── */}
@@ -993,40 +987,6 @@ const styles = StyleSheet.create({
     width: 40, height: 4,
     backgroundColor: '#555',
     borderRadius: 2,
-  },
-
-  fnScrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end',
-    zIndex: 50,
-  },
-  fnSheet: {
-    backgroundColor: '#1c1c1c',
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    maxHeight: '55%',
-  },
-  fnHandle: {
-    width: 36, height: 4,
-    borderRadius: 2,
-    backgroundColor: '#2e2e2e',
-    alignSelf: 'center',
-    marginBottom: 14,
-  },
-  fnLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.9,
-    color: '#555',
-    marginBottom: 8,
-  },
-  fnText: {
-    fontSize: 14,
-    color: '#c0c0c0',
-    lineHeight: 22,
   },
 
   backlinksRow: {
