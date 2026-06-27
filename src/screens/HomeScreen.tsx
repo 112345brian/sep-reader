@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TextInput, FlatList, SectionList, TouchableOpacity,
-  StyleSheet, StatusBar, ActivityIndicator, Alert,
+  StyleSheet, StatusBar, Alert,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -14,6 +14,7 @@ import {
 } from '../services/db';
 import type { EntrySummary } from '../types';
 import type { AnnotationWithTitle } from '../services/db';
+import EmanationSpinner from '../components/EmanationSpinner';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -480,7 +481,7 @@ export default function HomeScreen() {
           keyboardShouldPersistTaps="handled"
           ListHeaderComponent={
             query.trim().length === 0 ? null
-              : searching ? <ActivityIndicator color={C.accent} style={{ marginTop: 32 }} />
+              : searching ? <View style={{ marginTop: 32, alignItems: 'center' }}><EmanationSpinner size={72} /></View>
               : results.length === 0 ? <Text style={styles.empty}>No results for "{query}"</Text>
               : null
           }
@@ -568,7 +569,7 @@ export default function HomeScreen() {
           {activeTab === 'browse' && (
             <View style={styles.browseContainer}>
               {!browseLoaded ? (
-                <ActivityIndicator color={C.accent} style={{ marginTop: 64 }} />
+                <View style={{ marginTop: 64, alignItems: 'center' }}><EmanationSpinner size={80} /></View>
               ) : (
                 <>
                   <SectionList<BrowseSectionItem>

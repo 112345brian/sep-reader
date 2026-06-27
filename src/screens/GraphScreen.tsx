@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, useWindowDimensions, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, useWindowDimensions, ScrollView,
 } from 'react-native';
 import Svg, { Line, Circle, G, Rect, Text as SvgText, Path } from 'react-native-svg';
 import Reanimated, {
@@ -18,6 +18,7 @@ import type { GraphNode, GraphEdge, GraphData, GraphView, CachedPosition } from 
 import { forceLayout, slugSeed } from '../utils/forceLayout';
 import type { LayoutNode } from '../utils/forceLayout';
 import { getGraph } from '../services/inpho';
+import EmanationSpinner from '../components/EmanationSpinner';
 import type { RootStackParamList } from '../../App';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -577,7 +578,7 @@ export default function GraphScreen() {
       <View style={[styles.canvas, { height: canvasH }]}>
         {loading ? (
           <View style={styles.loadingWrap}>
-            <ActivityIndicator color="#5b8ef5" />
+            <EmanationSpinner size={84} />
             <Text style={styles.loadingLabel}>
               {warming ? 'Computing layout…' : 'Mapping connections…'}
             </Text>

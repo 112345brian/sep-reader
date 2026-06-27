@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ActivityIndicator, InteractionManager,
+  View, Text, StyleSheet, InteractionManager,
   TouchableOpacity, Share, Linking, Pressable, Animated, ScrollView,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -28,6 +28,7 @@ import type { Inline } from '../utils/sepHtml/types';
 import AnnotationModal from '../components/AnnotationModal';
 import TocSheet, { TOC_SHEET_H } from '../components/TocSheet';
 import FootnoteSheet from '../components/FootnoteSheet';
+import EmanationSpinner from '../components/EmanationSpinner';
 import { parseToc } from '../utils/parseToc';
 import OrphanedAnnotationsBanner from '../components/OrphanedAnnotationsBanner';
 import type { EntryRow, Annotation } from '../types';
@@ -670,7 +671,7 @@ export default function ArticleScreen() {
       {/* ── Loading states ── */}
       {(state.phase === 'loading' || state.phase === 'fetching') && (
         <View style={styles.center}>
-          <ActivityIndicator color="#5b8ef5" size="large" />
+          <EmanationSpinner size={120} />
           {state.phase === 'fetching' && (
             <Text style={styles.fetchingLabel}>Loading article…</Text>
           )}
@@ -709,12 +710,12 @@ export default function ArticleScreen() {
           <View style={styles.webWrap}>
             {!webReady && !USE_NATIVE_RENDERER && (
               <View style={styles.webOverlay}>
-                <ActivityIndicator color="#5b8ef5" />
+                <EmanationSpinner size={90} />
               </View>
             )}
             {USE_NATIVE_RENDERER && !nativeArticle && (
               <View style={styles.webOverlay}>
-                <ActivityIndicator color="#5b8ef5" />
+                <EmanationSpinner size={90} />
               </View>
             )}
             {USE_NATIVE_RENDERER && nativeArticle ? (
