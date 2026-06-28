@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0]
+
+### Added
+- **Footnote sheet** — tapping a footnote marker now opens a slide-up sheet (same style as the table of contents modal) showing the full footnote text inline, rather than navigating away. Works throughout the article body and in the preamble.
+- **Footnotes stored in the database** — `notes.html` is fetched on first open and cached in a new `notes_html` column, so footnote content is available offline and subsequent opens are instant.
+
+### Fixed
+- **Footnote markers showed brackets** — SEP wraps footnote refs as `<sup>[<a href="notes.html#note-1">1</a>]</sup>` with `[` `]` as sibling text nodes. The parser now strips them, rendering just the number. Detection also covers the `notes.html#note-N` href form (not just `#note-N`).
+- **Preamble footnote taps did nothing** — `onFootnotePress` was missing from the `ArticleHeader` handler object, so footnotes in the author/publication line (e.g. the "survive.[1]" note in Aristotle) silently no-op'd. Handler is now threaded through correctly.
+- **Footnote tap target was too small** — the marker glyph is now padded with a hair-space lead and en-space trail so the pressable run is wide enough to hit reliably without being visually obtrusive.
+
 ## [0.6.8]
 
 ### Added
